@@ -1,5 +1,6 @@
 """Corpus -> graph elements, and projecting the index back from graph nodes."""
 
+from cjm_dev_graph_schema.identity import note_node_id
 from cjm_dev_graph_schema.vocab import DevNodeKinds, DevRelations
 from cjm_markdown_decompose_core.extract import note_from_text
 from cjm_markdown_decompose_core.ingest import corpus_graph_elements
@@ -38,6 +39,18 @@ def test_corpus_graph_elements_counts():
     # alpha has two [[links]] -> two REFERENCES edges; beta has none.
     assert len(edges) == 2
     assert all(e["relation_type"] == DevRelations.REFERENCES for e in edges)
+
+
+def test_alias_map_heals_a_drifted_reference():
+    # alpha links [[beta]] (real) and [[gamma]] (dangling). Confirming gamma->beta
+    # resolves the once-dangling edge onto beta's real id, file left untouched.
+    nodes, edges = corpus_graph_elements(_notes(), aliases={"gamma": "beta"})
+    targets = {e["target_id"] for e in edges}
+    assert targets == {note_node_id("beta")}  # both refs now land on beta
+    assert note_node_id("gamma") not in targets  # the drifted id is gone
+    # Without the alias the drifted edge points at the (absent) gamma id.
+    _, plain = corpus_graph_elements(_notes())
+    assert note_node_id("gamma") in {e["target_id"] for e in plain}
 
 
 def test_note_view_from_graph_node_dict():
