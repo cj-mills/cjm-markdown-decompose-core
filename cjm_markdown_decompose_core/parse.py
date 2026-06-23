@@ -18,6 +18,11 @@ _FRONTMATTER_RE = re.compile(r"\A---[ \t]*\r?\n(.*?)\r?\n---[ \t]*\r?\n?", re.DO
 _WIKI_LINK_RE = re.compile(r"\[\[([^\[\]]+?)\]\]")
 # ATX heading: 1-6 leading `#`, then the text.
 _HEADING_RE = re.compile(r"^(#{1,6})[ \t]+(.*?)[ \t]*#*[ \t]*$", re.MULTILINE)
+# Code spans, stripped before wiki-link extraction so QUOTED example syntax
+# (`[[wiki-link]]` in prose ABOUT links) is not mistaken for a real reference:
+# fenced blocks first (multi-line), then inline backtick runs (single-line).
+_FENCED_CODE_RE = re.compile(r"```.*?```", re.DOTALL)
+_INLINE_CODE_RE = re.compile(r"(`+)(?:.+?)\1")
 
 
 @dataclass
@@ -55,16 +60,27 @@ def parse_frontmatter(
     return loaded if isinstance(loaded, dict) else {}
 
 
+def strip_code(
+    body: str,  # Document body
+) -> str:  # Body with fenced + inline code spans blanked
+    """Blank out fenced + inline code spans (replaced with a space, length-agnostic).
+
+    Wiki-link extraction runs on the result so that `[[link]]` written inside
+    backticks — example syntax in notes that DISCUSS links, not a real reference —
+    is never picked up as an edge (the corpus-findings extraction false positive)."""
+    return _INLINE_CODE_RE.sub(" ", _FENCED_CODE_RE.sub(" ", body))
+
+
 def extract_wiki_links(
     body: str,  # Document body
 ) -> List[str]:  # `[[link]]` targets, de-duplicated in first-seen order
     """Extract `[[wiki-link]]` targets from the body, de-duplicated, order-preserved.
 
-    The target is the trimmed inner text (a note slug). Order and de-duplication
-    are stable so the resulting REFERENCES edge set is deterministic across
-    re-extraction."""
+    The target is the trimmed inner text (a note slug); code spans are stripped
+    first so quoted example syntax is excluded. Order and de-duplication are stable
+    so the resulting REFERENCES edge set is deterministic across re-extraction."""
     seen: Dict[str, None] = {}
-    for m in _WIKI_LINK_RE.finditer(body):
+    for m in _WIKI_LINK_RE.finditer(strip_code(body)):
         target = m.group(1).strip()
         if target:
             seen.setdefault(target, None)

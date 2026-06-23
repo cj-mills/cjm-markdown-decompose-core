@@ -49,6 +49,17 @@ def test_extract_wiki_links_dedup_order_preserved():
     assert links == ["current-arc-status", "self-hosting-graph-arc-first-slice-plan"]
 
 
+def test_extract_wiki_links_ignores_code_spans():
+    # Quoted example syntax (in notes ABOUT links) is NOT a real reference.
+    body = (
+        "A real ref to [[real-note]] here.\n"
+        "Inline example: a dangling `[[wiki-link]]` marks a TODO, and `[[ref]]` too.\n"
+        "```\nfenced [[not-a-ref]] block\n```\n"
+        "Another real [[second-note]].\n"
+    )
+    assert extract_wiki_links(body) == ["real-note", "second-note"]
+
+
 def test_extract_headings():
     assert extract_headings(DOC) == [(1, "Heading One"), (2, "Heading Two")]
 
