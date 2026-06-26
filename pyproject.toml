@@ -14,7 +14,7 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
 ]
-dependencies = ['cjm-dev-graph-schema>=0.0.9', 'cjm-context-graph-layer>=0.0.7', 'cjm-context-graph-primitives>=0.0.12', 'pyyaml>=6.0']
+dependencies = ['cjm-dev-graph-schema>=0.0.10', 'cjm-context-graph-layer>=0.0.7', 'cjm-context-graph-primitives>=0.0.12', 'pyyaml>=6.0']
 
 [project.urls]
 Repository = "https://github.com/cj-mills/cjm-markdown-decompose-core"

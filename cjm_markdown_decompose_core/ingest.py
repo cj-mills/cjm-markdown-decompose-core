@@ -20,11 +20,13 @@ def corpus_graph_elements(
 
     One `Note` node per file plus its relationship edges — `REFERENCES`
     (`[[wiki-links]]` + cross-post links), `TAGGED` (categories), `IN_SERIES`
-    (series membership). The shared facet nodes (`Topic` per category, `Series`
-    per series) are emitted ONCE, deduped across the corpus, so independent notes
-    sharing a category/series converge on one node. Deterministic ids make the
-    result idempotent under `extend_graph` — re-ingesting collides into verified
-    no-ops rather than duplicating.
+    (series membership) — and, when the note was decomposed `with_sections`, its
+    `Section` nodes + `HAS_SECTION`/`PART_OF` edges (the body content + hierarchy).
+    The shared facet nodes (`Topic` per category, `Series` per series) are emitted
+    ONCE, deduped across the corpus, so independent notes sharing a category/series
+    converge on one node. Deterministic ids make the result idempotent under
+    `extend_graph` — re-ingesting collides into verified no-ops rather than
+    duplicating.
 
     A confirmed `aliases` map resolves drifted link slugs to their canonical note
     before the edge is built, so a once-dangling `[[wiki-link]]` (or cross-post
@@ -39,6 +41,9 @@ def corpus_graph_elements(
         edges.extend(n.cross_post_edges(aliases))
         edges.extend(n.tagged_edges())
         edges.extend(n.series_edges())
+        for sec in n.sections:
+            nodes.append(sec.to_graph_node())
+            edges.extend(sec.structural_edges())
         for c in n.categories:
             topics.setdefault(c, None)
         for s in n.series_refs:
