@@ -9,7 +9,7 @@ a graph query.
 """
 
 import os
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from cjm_dev_graph_schema.nodes import NoteNode
 
@@ -103,4 +103,95 @@ def render_memory_index(
         lines = [note_index_line(n) for n in sorted(buckets[key], key=lambda n: n.title.lower())]
         parts.append(f"## {heading}\n" + "\n".join(lines))
 
+    return "\n\n".join(parts) + "\n"
+
+
+# --- Onboarding surface (the MEMORY.md-as-projection reframe) -----------------
+#
+# A different projection from `render_memory_index`: instead of ENUMERATING every
+# note (which pays session budget for mostly task-conditional content), emit a
+# radically-minimal resident core + a MAP of how to pull the rest from the graph
+# on demand. Domain-neutral: the graph-specific prose (how to query THIS graph,
+# the guardrails) is injected by the driver; the core only assembles the structure
+# + the coverage map + the terse push-core lines.
+
+_DEFAULT_INTRO = (
+    "> Project knowledge lives in a **context graph**, not this file. This is your MAP "
+    "+ the few things to know *before* querying. Pull the rest on demand — don't expect "
+    "it enumerated here."
+)
+_DEFAULT_HOW_TO_QUERY = (
+    "## How to query\n"
+    "Use your read-only graph query tool: `relevant \"<your task>\"` ranks nearby nodes; "
+    "`show <id>` drills into one node + its neighbours; `state` is an overview."
+)
+_DEFAULT_HOW_TO_PULL = (
+    "## How to pull\n"
+    "1. At task start, run `relevant \"<task>\"` — it ranks by structural nearness "
+    "(decisions, notes, code, cross-links), richer than any static list.\n"
+    "2. `show <id>` to read a node in full + its neighbours.\n"
+    "3. If a landmark above names your area, use its query hint as a starting point.\n"
+    "4. Treat what you pull as the live source of truth; this surface is only the map."
+)
+
+
+def first_sentence(
+    text: str,         # The full description text
+    limit: int = 220,  # Hard character cap when no sentence boundary is found
+) -> str:  # A terse one-line hook
+    """A deterministic terse hook: the description's first sentence, capped.
+
+    The frontmatter `description` is a full recall-abstract (it feeds relevance, so we
+    keep it whole there); the onboarding surface needs a terse navigational hook, so
+    take the first sentence (else hard-cap with an ellipsis). Same text in -> same hook."""
+    t = " ".join((text or "").split())
+    if not t:
+        return ""
+    best = -1
+    for sep in (". ", "; "):
+        i = t.find(sep)
+        if 0 < i <= limit and (best < 0 or i < best):
+            best = i
+    if best > 0:
+        return t[:best + 1].rstrip()
+    return (t[:limit].rstrip() + "…") if len(t) > limit else t
+
+
+def render_onboarding_surface(
+    notes: Iterable[NoteNode],              # All Note nodes (the coverage map + push-core lookup)
+    push_slugs: Iterable[str],              # Allowlist of slugs rendered inline as the resident PUSH core
+    landmarks: Iterable[Tuple[str, str]],   # (label, query-hint) coverage pointers (NOT an enumeration)
+    arc_lead: str,                          # The live arc-lead anchor (one line)
+    *,
+    title: str = "# Project Memory — Onboarding Surface",  # Document title
+    intro: str = _DEFAULT_INTRO,                # Orientation prose under the title
+    how_to_query: str = _DEFAULT_HOW_TO_QUERY,  # Graph-specific "how to query" section (driver overrides)
+    how_to_pull: str = _DEFAULT_HOW_TO_PULL,    # The pull-discipline section
+) -> str:  # The rendered onboarding-surface markdown
+    """Render the onboarding surface: orientation + how-to-query + resident PUSH core + landmark map + how-to-pull.
+
+    The push core renders one terse line per allowlisted slug (title + first-sentence
+    hook); the landmark map lists coverage pointers + per-category counts (the territory,
+    not its contents). Deterministic for a given (notes, seeds) — a regenerate is a clean
+    idempotent overwrite. Graph-specific prose is injected via `how_to_query` so the core
+    stays domain-neutral."""
+    notes = list(notes)
+    by_slug = {n.slug: n for n in notes}
+    counts: Dict[str, int] = {}
+    for n in notes:
+        counts[n.note_type or "other"] = counts.get(n.note_type or "other", 0) + 1
+    total = sum(counts.values())
+
+    parts: List[str] = [f"{title}\n\n{intro}", how_to_query]
+    push_lines = [
+        (f"- **{by_slug[s].title}** — {first_sentence(by_slug[s].description)}" if s in by_slug
+         else f"- _(push node not found on-graph: {s})_")
+        for s in push_slugs
+    ]
+    parts.append("## Resident core (read me)\n- " + arc_lead + "\n" + "\n".join(push_lines))
+    cov = ", ".join(f"{k}:{v}" for k, v in sorted(counts.items()))
+    lm = "\n".join(f"- **{label}** → `relevant \"{hint}\"`" for label, hint in landmarks)
+    parts.append("## Landmark map — what's on-graph (coverage, not enumeration)\n"
+                 f"_~{total} notes ({cov}); query a landmark to pull its cluster:_\n" + lm)
+    parts.append(how_to_pull)
     return "\n\n".join(parts) + "\n"

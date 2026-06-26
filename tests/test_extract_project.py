@@ -1,8 +1,11 @@
 """Extract markdown -> NoteNode and project notes -> MEMORY.md index (with idempotency)."""
 
 from cjm_dev_graph_schema.identity import note_node_id
+from cjm_dev_graph_schema.nodes import NoteNode
 from cjm_markdown_decompose_core.extract import note_from_text
-from cjm_markdown_decompose_core.project import note_index_line, render_memory_index
+from cjm_markdown_decompose_core.project import (
+    first_sentence, note_index_line, render_memory_index, render_onboarding_surface,
+)
 
 PROJECT_DOC = """---
 name: self-hosting-graph-arc
@@ -99,3 +102,48 @@ def test_render_is_idempotent():
     notes = [note_from_text("memory/refinement.md", FEEDBACK_DOC),
              note_from_text("memory/arc.md", PROJECT_DOC)]
     assert render_memory_index(notes) == render_memory_index(notes)
+
+
+# --- Onboarding surface ------------------------------------------------------
+
+def _note(slug, title, desc, ntype):
+    return NoteNode(slug=slug, title=title, path=f"memory/{slug}.md",
+                    content_hash="", description=desc, note_type=ntype)
+
+
+def test_first_sentence_takes_boundary_else_caps():
+    assert first_sentence("First sentence. Second one.") == "First sentence."
+    assert first_sentence("clause one; clause two") == "clause one;"
+    assert first_sentence("no boundary at all") == "no boundary at all"
+    assert first_sentence("") == ""
+    capped = first_sentence("x" * 300, limit=50)
+    assert capped.endswith("…") and len(capped) <= 52
+
+
+def test_render_onboarding_surface_structure_push_and_landmarks():
+    notes = [
+        _note("explicit-graph-db-path", "Explicit Graph Db Path", "Keep it explicit. Always.", "feedback"),
+        _note("a-project", "A Project", "Some project note.", "project"),
+    ]
+    md = render_onboarding_surface(
+        notes,
+        push_slugs=["explicit-graph-db-path", "absent-slug"],
+        landmarks=[("Design dialect", "design dialect")],
+        arc_lead="ACTIVE LEAD: do the thing.",
+        how_to_query="## How to query\nuse the tool.",
+    )
+    # resident core: the arc-lead anchor + a TERSE push hook (first sentence) + a missing-slug placeholder
+    assert "ACTIVE LEAD: do the thing." in md
+    assert "- **Explicit Graph Db Path** — Keep it explicit." in md
+    assert "push node not found on-graph: absent-slug" in md
+    # landmark map = coverage counts (NOT enumeration: the project note is counted, never listed) + injected prose
+    assert 'relevant "design dialect"' in md
+    assert "feedback:1, project:1" in md
+    assert "A Project" not in md  # coverage, not enumeration
+    assert "## How to query\nuse the tool." in md
+
+
+def test_render_onboarding_surface_is_deterministic():
+    notes = [_note("explicit-graph-db-path", "Explicit Graph Db Path", "Keep it explicit.", "feedback")]
+    args = (notes, ["explicit-graph-db-path"], [("Dialect", "dialect")], "LEAD.")
+    assert render_onboarding_surface(*args) == render_onboarding_surface(*args)
