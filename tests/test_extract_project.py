@@ -43,6 +43,34 @@ def test_slug_falls_back_to_relative_path_when_no_name():
     assert note.title == "Sub/Loose"  # titleized from slug
 
 
+def test_index_md_identified_by_directory_permalink():
+    # SSG `posts/<slug>/index.md` → identity is the directory (the permalink),
+    # not the literal `index` stem (the corpus identity-collision pinch).
+    a = note_from_text("/corpus/posts/yolox-train/index.md", NO_NAME_DOC, corpus_root="/corpus")
+    b = note_from_text("/corpus/posts/dumbing-us-down/index.md", NO_NAME_DOC, corpus_root="/corpus")
+    assert a.slug == "posts/yolox-train"
+    assert b.slug == "posts/dumbing-us-down"
+    assert a.id != b.id  # no longer collapsed onto a single `index` node
+
+    # Identity relative to the posts root itself yields the bare permalink.
+    c = note_from_text("/corpus/posts/yolox-train/index.md", NO_NAME_DOC, corpus_root="/corpus/posts")
+    assert c.slug == "yolox-train"
+
+
+def test_root_level_index_falls_back_to_dir_name():
+    note = note_from_text("/corpus/posts/index.md", NO_NAME_DOC, corpus_root="/corpus/posts")
+    assert note.slug == "posts"  # relative-to-root "." guarded to the dir name
+
+
+def test_non_index_and_frontmatter_name_unaffected_by_index_rule():
+    # The memory corpus is untouched: frontmatter `name` still wins outright,
+    # and a non-`index` file keeps its stem-based fallback slug.
+    named = note_from_text("/corpus/posts/x/index.md", PROJECT_DOC, corpus_root="/corpus")
+    assert named.slug == "self-hosting-graph-arc"
+    loose = note_from_text("/corpus/sub/loose.md", NO_NAME_DOC, corpus_root="/corpus")
+    assert loose.slug == "sub/loose"
+
+
 def test_extraction_is_deterministic():
     a = note_from_text("memory/x.md", PROJECT_DOC)
     b = note_from_text("memory/x.md", PROJECT_DOC)

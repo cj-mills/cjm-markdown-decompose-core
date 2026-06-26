@@ -27,18 +27,27 @@ def slug_from(
     The fallback is the corpus-relative path without extension (or the bare stem
     when no root is given) — stable as long as the file does not move, which is
     why an explicit frontmatter `name` is preferred for content that outlives its
-    location."""
+    location.
+
+    SSG convention (Quarto/Hugo/…): a `<dir>/index.md` file is identified by its
+    DIRECTORY — the permalink — not the literal `index` stem. Otherwise every
+    post in a `posts/<slug>/index.md` tree collapses onto one `index` slug (the
+    corpus-findings identity collision). The post's stable identity is its
+    directory path relative to the corpus root."""
     name = frontmatter.get("name")
     if isinstance(name, str) and name.strip():
         return name.strip()
     p = Path(path)
+    # `<dir>/index.md` → identify by the directory (permalink); else drop the suffix.
+    ident = p.parent if p.stem.lower() == "index" else p.with_suffix("")
     if corpus_root:
         try:
-            rel = p.relative_to(corpus_root)
+            rel = ident.relative_to(corpus_root)
         except ValueError:
-            rel = Path(p.name)
-        return rel.with_suffix("").as_posix()
-    return p.stem
+            rel = Path(ident.name)
+        # A root-level `index.md` relativizes to "." — fall back to the dir name.
+        return rel.as_posix() if rel != Path(".") else ident.name
+    return ident.name
 
 
 def title_from(
