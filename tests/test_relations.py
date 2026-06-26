@@ -9,7 +9,7 @@ from cjm_markdown_decompose_core.relations import (
 # A representative Quarto blog post (shape from christianjmills/posts).
 QUARTO_POST = """---
 title: "Training YOLOX Models"
-date: 2023-8-21
+date: 2023-08-21
 categories: [pytorch, object-detection, "YOLOX", tutorial]
 aliases:
 - /posts/icevision-openvino-unity-tutorial/part-1/
@@ -108,3 +108,11 @@ def test_memory_corpus_unaffected():
     note = note_from_text("memory/some.md", MEMORY_DOC)
     assert note.categories == [] and note.series_refs == [] and note.cross_post_refs == []
     assert note.references == ["other-memory"]  # wiki-links still work
+
+
+def test_yaml_date_frontmatter_is_json_safe():
+    import json
+    # PyYAML parses `date:` into a datetime.date; the wire dict must stay JSON-safe.
+    note = note_from_text("/c/posts/x/index.md", QUARTO_POST, corpus_root="/c/posts")
+    assert note.metadata["date"] == "2023-08-21"  # coerced to an ISO string
+    json.dumps(note.to_graph_node())  # the graph-store boundary: must not raise

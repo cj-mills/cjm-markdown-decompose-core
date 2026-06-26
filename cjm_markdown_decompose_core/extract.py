@@ -7,6 +7,7 @@ parsing it builds on (`parse`) stays schema-free; this module is where the
 markdown corpus meets the dev schema.
 """
 
+import datetime
 import os
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -16,6 +17,25 @@ from cjm_dev_graph_schema.nodes import NoteNode
 
 from .parse import ParsedMarkdown, parse_markdown
 from .relations import harvest_relations
+
+
+def _json_safe(
+    value: Any,  # A parsed-frontmatter value (PyYAML may produce date/datetime, nested)
+) -> Any:  # The same value with date/datetime coerced to ISO strings (recursively)
+    """Coerce frontmatter values to JSON-serializable forms for the graph wire dict.
+
+    PyYAML parses `date: 2023-8-21` into a Python `datetime.date` (and timestamps
+    into `datetime`), which the metadata passthrough carries verbatim and the graph
+    store then can't JSON-encode. Dates are stable identity-irrelevant metadata, so
+    ISO strings are the faithful wire form (the memory corpus never hit this — it has
+    no date frontmatter; the blog posts do)."""
+    if isinstance(value, datetime.date):  # also catches datetime.datetime (a subclass)
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {k: _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(v) for v in value]
+    return value
 
 
 def slug_from(
@@ -102,7 +122,7 @@ def note_from_parsed(
         description=description.strip() if isinstance(description, str) else "",
         note_type=note_type_from(fm),
         references=list(parsed.wiki_links),
-        metadata={k: v for k, v in fm.items()
+        metadata={k: _json_safe(v) for k, v in fm.items()
                   if k not in ("name", "title", "description", "metadata")},
         categories=rel.categories,
         series_refs=rel.series_refs,
