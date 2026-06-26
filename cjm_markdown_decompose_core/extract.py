@@ -15,6 +15,7 @@ from cjm_context_graph_primitives.provenance import SourceRef
 from cjm_dev_graph_schema.nodes import NoteNode
 
 from .parse import ParsedMarkdown, parse_markdown
+from .relations import harvest_relations
 
 
 def slug_from(
@@ -78,11 +79,21 @@ def note_from_parsed(
     content_hash: str,        # Content hash over the file bytes
     parsed: ParsedMarkdown,   # The parsed document
     corpus_root: Optional[str] = None,  # Root for the fallback slug
+    profile: Optional[str] = None,      # Relationship-harvest profile (None = auto-detect)
 ) -> NoteNode:  # The coarse Note node
-    """Build a coarse `NoteNode` from already-parsed Markdown."""
+    """Build a coarse `NoteNode` from already-parsed Markdown.
+
+    Beyond the coarse identity/metadata, the per-source-type relationship
+    harvesters (`relations`) add the corpus's real relationship signals —
+    categories, series membership, cross-post links, aliases — selected by the
+    detected (or given) source profile. A cross-post link to THIS post's own
+    section is dropped (a self-reference is not a cross-post edge)."""
     fm = parsed.frontmatter
     slug = slug_from(path, fm, corpus_root)
     description = fm.get("description")
+    rel = harvest_relations(parsed, profile)
+    own = {slug, Path(path).parent.name}  # this post's own permalink (both namespaces)
+    cross = [(p, a) for (p, a) in rel.cross_post_refs if p not in own]
     return NoteNode(
         slug=slug,
         title=title_from(slug, fm),
@@ -93,6 +104,10 @@ def note_from_parsed(
         references=list(parsed.wiki_links),
         metadata={k: v for k, v in fm.items()
                   if k not in ("name", "title", "description", "metadata")},
+        categories=rel.categories,
+        series_refs=rel.series_refs,
+        aliases=rel.aliases,
+        cross_post_refs=cross,
     )
 
 
@@ -100,15 +115,17 @@ def note_from_text(
     path: str,                          # The file path (provenance locator)
     text: str,                          # The full document text
     corpus_root: Optional[str] = None,  # Root for the fallback slug
+    profile: Optional[str] = None,      # Relationship-harvest profile (None = auto-detect)
 ) -> NoteNode:  # The coarse Note node
     """Parse + map in one step from in-memory text (hashes the UTF-8 bytes)."""
     return note_from_parsed(path, SourceRef.compute_hash(text.encode("utf-8")),
-                            parse_markdown(text), corpus_root)
+                            parse_markdown(text), corpus_root, profile)
 
 
 def note_from_file(
     path: str,                          # Path to the Markdown file
     corpus_root: Optional[str] = None,  # Root for the fallback slug
+    profile: Optional[str] = None,      # Relationship-harvest profile (None = auto-detect)
 ) -> NoteNode:  # The coarse Note node
     """Read a Markdown file and map it to a coarse `NoteNode`.
 
@@ -116,4 +133,4 @@ def note_from_file(
     stored); the text is decoded as UTF-8 for parsing."""
     raw = Path(path).read_bytes()
     return note_from_parsed(path, SourceRef.compute_hash(raw),
-                            parse_markdown(raw.decode("utf-8")), corpus_root)
+                            parse_markdown(raw.decode("utf-8")), corpus_root, profile)
