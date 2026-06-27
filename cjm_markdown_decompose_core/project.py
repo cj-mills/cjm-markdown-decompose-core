@@ -167,14 +167,20 @@ def render_onboarding_surface(
     intro: str = _DEFAULT_INTRO,                # Orientation prose under the title
     how_to_query: str = _DEFAULT_HOW_TO_QUERY,  # Graph-specific "how to query" section (driver overrides)
     how_to_pull: str = _DEFAULT_HOW_TO_PULL,    # The pull-discipline section
+    push_hooks: Optional[Dict[str, str]] = None,  # slug -> terse COMPLETE hook (else first_sentence fallback)
 ) -> str:  # The rendered onboarding-surface markdown
     """Render the onboarding surface: orientation + how-to-query + resident PUSH core + landmark map + how-to-pull.
 
-    The push core renders one terse line per allowlisted slug (title + first-sentence
-    hook); the landmark map lists coverage pointers + per-category counts (the territory,
-    not its contents). Deterministic for a given (notes, seeds) — a regenerate is a clean
-    idempotent overwrite. Graph-specific prose is injected via `how_to_query` so the core
-    stays domain-neutral."""
+    The push core renders one line per allowlisted slug (title + an explicit terse hook
+    — else the description's first sentence — + a `show <id>` pull-hint for the full node,
+    the exact-node analogue of a landmark's `relevant` cluster hint); the landmark map
+    lists coverage pointers + per-category counts (the territory, not its contents).
+    Deterministic for a given (notes, seeds) — a regenerate is a clean idempotent overwrite.
+    Graph-specific prose is injected via `how_to_query` so the core stays domain-neutral.
+
+    A push node's `description` is a full recall-abstract that often BURIES the actionable
+    point, so truncating it can mislead (e.g. severing "NEVER delete the journal"); the
+    explicit `push_hooks` hook is a terse COMPLETE statement — `show <id>` fetches the rest."""
     notes = list(notes)
     by_slug = {n.slug: n for n in notes}
     counts: Dict[str, int] = {}
@@ -183,11 +189,14 @@ def render_onboarding_surface(
     total = sum(counts.values())
 
     parts: List[str] = [f"{title}\n\n{intro}", how_to_query]
-    push_lines = [
-        (f"- **{by_slug[s].title}** — {first_sentence(by_slug[s].description)}" if s in by_slug
-         else f"- _(push node not found on-graph: {s})_")
-        for s in push_slugs
-    ]
+    hooks = push_hooks or {}
+    push_lines: List[str] = []
+    for s in push_slugs:
+        if s not in by_slug:
+            push_lines.append(f"- _(push node not found on-graph: {s})_")
+            continue
+        n = by_slug[s]
+        push_lines.append(f"- **{n.title}** — {hooks.get(s) or first_sentence(n.description)}  ↳ `show {n.id}`")
     parts.append("## Resident core (read me)\n- " + arc_lead + "\n" + "\n".join(push_lines))
     cov = ", ".join(f"{k}:{v}" for k, v in sorted(counts.items()))
     lm = "\n".join(f"- **{label}** → `relevant \"{hint}\"`" for label, hint in landmarks)

@@ -123,22 +123,27 @@ def test_first_sentence_takes_boundary_else_caps():
 def test_render_onboarding_surface_structure_push_and_landmarks():
     notes = [
         _note("explicit-graph-db-path", "Explicit Graph Db Path", "Keep it explicit. Always.", "feedback"),
+        _note("a-guardrail", "A Guardrail", "First point here. Buried critical bit.", "feedback"),
         _note("a-project", "A Project", "Some project note.", "project"),
     ]
     md = render_onboarding_surface(
         notes,
-        push_slugs=["explicit-graph-db-path", "absent-slug"],
+        push_slugs=["explicit-graph-db-path", "a-guardrail", "absent-slug"],
         landmarks=[("Design dialect", "design dialect")],
         arc_lead="ACTIVE LEAD: do the thing.",
         how_to_query="## How to query\nuse the tool.",
+        push_hooks={"explicit-graph-db-path": "Always explicit — complete hook."},
     )
-    # resident core: the arc-lead anchor + a TERSE push hook (first sentence) + a missing-slug placeholder
     assert "ACTIVE LEAD: do the thing." in md
-    assert "- **Explicit Graph Db Path** — Keep it explicit." in md
+    # explicit hook OVERRIDES the description truncation + carries a `show` pull-hint
+    assert "- **Explicit Graph Db Path** — Always explicit — complete hook.  ↳ `show " in md
+    # no hook -> first-sentence fallback (still a complete first sentence) + `show` pull-hint
+    assert "- **A Guardrail** — First point here.  ↳ `show " in md
+    # missing slug -> placeholder, no pull-hint
     assert "push node not found on-graph: absent-slug" in md
     # landmark map = coverage counts (NOT enumeration: the project note is counted, never listed) + injected prose
     assert 'relevant "design dialect"' in md
-    assert "feedback:1, project:1" in md
+    assert "feedback:2, project:1" in md
     assert "A Project" not in md  # coverage, not enumeration
     assert "## How to query\nuse the tool." in md
 
