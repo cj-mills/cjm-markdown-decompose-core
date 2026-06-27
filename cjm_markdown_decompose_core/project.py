@@ -168,6 +168,7 @@ def render_onboarding_surface(
     how_to_query: str = _DEFAULT_HOW_TO_QUERY,  # Graph-specific "how to query" section (driver overrides)
     how_to_pull: str = _DEFAULT_HOW_TO_PULL,    # The pull-discipline section
     push_hooks: Optional[Dict[str, str]] = None,  # slug -> terse COMPLETE hook (else first_sentence fallback)
+    coverage: Optional[str] = None,             # Pre-rendered AUTO landmark subsection (whole-graph facets), appended under the curated map
 ) -> str:  # The rendered onboarding-surface markdown
     """Render the onboarding surface: orientation + how-to-query + resident PUSH core + landmark map + how-to-pull.
 
@@ -200,8 +201,11 @@ def render_onboarding_surface(
     parts.append("## Resident core (read me)\n- " + arc_lead + "\n" + "\n".join(push_lines))
     cov = ", ".join(f"{k}:{v}" for k, v in sorted(counts.items()))
     lm = "\n".join(f"- **{label}** → `relevant \"{hint}\"`" for label, hint in landmarks)
-    parts.append("## Landmark map — what's on-graph (coverage, not enumeration)\n"
-                 f"_~{total} notes ({cov}); query a landmark to pull its cluster:_\n" + lm)
+    landmark_section = ("## Landmark map — what's on-graph (coverage, not enumeration)\n"
+                        f"_~{total} notes ({cov}); query a landmark to pull its cluster:_\n" + lm)
+    if coverage:  # the auto-derived whole-graph facets (curated map stays; this augments it)
+        landmark_section += "\n\n" + coverage.strip()
+    parts.append(landmark_section)
     parts.append(how_to_pull)
     return "\n\n".join(parts) + "\n"
 

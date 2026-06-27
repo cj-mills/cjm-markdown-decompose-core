@@ -152,3 +152,16 @@ def test_render_onboarding_surface_is_deterministic():
     notes = [_note("explicit-graph-db-path", "Explicit Graph Db Path", "Keep it explicit.", "feedback")]
     args = (notes, ["explicit-graph-db-path"], [("Dialect", "dialect")], "LEAD.")
     assert render_onboarding_surface(*args) == render_onboarding_surface(*args)
+
+
+def test_render_onboarding_surface_coverage_augments_landmark_map():
+    notes = [_note("a-project", "A Project", "x", "project")]
+    cov = "### Graph at a glance (auto-derived)\n_By kind:_ Note×85 · Section×498"
+    md = render_onboarding_surface(notes, ["a-project"], [("Dialect", "dialect")], "LEAD.",
+                                   coverage=cov)
+    # The auto coverage lands UNDER the curated landmark map and ABOVE 'How to pull'.
+    assert cov in md
+    assert md.index("Landmark map") < md.index("Graph at a glance") < md.index("How to pull")
+    # Absent coverage -> unchanged (back-compat).
+    assert "Graph at a glance" not in render_onboarding_surface(notes, ["a-project"],
+                                                                [("Dialect", "dialect")], "LEAD.")
