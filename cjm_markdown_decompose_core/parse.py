@@ -32,6 +32,7 @@ class ParsedMarkdown:
     body: str = ""                                             # Document body (frontmatter stripped)
     wiki_links: List[str] = field(default_factory=list)       # `[[link]]` targets, de-duplicated in first-seen order
     headings: List[Tuple[int, str]] = field(default_factory=list)  # (level, text) per ATX heading, in document order
+    frontmatter_raw: str = ""                                 # The VERBATIM frontmatter prefix (fences + YAML + trailing newline); "" when none. `frontmatter_raw + body == original text`, so it is the lossless round-trip source for the frontmatter (the parsed `frontmatter` dict is a derived projection)
 
 
 def split_frontmatter(
@@ -99,9 +100,14 @@ def parse_markdown(
 ) -> ParsedMarkdown:  # The structural decomposition
     """Parse a Markdown document into frontmatter + body + wiki-links + headings."""
     raw_fm, body = split_frontmatter(text)
+    # The verbatim frontmatter prefix is everything `split_frontmatter` consumed
+    # (the leading `---` fence, YAML, closing fence, trailing newline) — i.e. the
+    # bytes before `body`. Reconstructed losslessly as `text[:len(text)-len(body)]`
+    # so that `frontmatter_raw + body == text` holds by construction ("" when none).
     return ParsedMarkdown(
         frontmatter=parse_frontmatter(raw_fm),
         body=body,
         wiki_links=extract_wiki_links(body),
         headings=extract_headings(body),
+        frontmatter_raw=text[:len(text) - len(body)],
     )

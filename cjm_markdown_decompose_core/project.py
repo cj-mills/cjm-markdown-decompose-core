@@ -11,7 +11,7 @@ a graph query.
 import os
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from cjm_dev_graph_schema.nodes import NoteNode
+from cjm_dev_graph_schema.nodes import NoteNode, SectionNode
 
 # Default category section order + display headings for the memory index.
 DEFAULT_SECTION_ORDER = ("project", "feedback", "reference", "user")
@@ -204,3 +204,45 @@ def render_onboarding_surface(
                  f"_~{total} notes ({cov}); query a landmark to pull its cluster:_\n" + lm)
     parts.append(how_to_pull)
     return "\n\n".join(parts) + "\n"
+
+
+# --- Lossless note round-trip (M1: memory bodies on-graph) --------------------
+#
+# The inverse of `lossless` decomposition: reassemble a note's exact file text
+# from its verbatim parts — the Note's `frontmatter_raw` plus every Section's
+# heading-inclusive `raw` span in document order. PURE concatenation, no
+# canonical-seam emission (prose derives nothing, unlike code's imports/ordering),
+# so the result is byte-for-byte the original file when the note was decomposed
+# `lossless=True`. This is M1's content-fidelity gate (file -> graph -> file ==
+# file) and the read leg of authoring memory on-graph (M2).
+
+def render_note_text(
+    frontmatter_raw: str,             # The note's verbatim frontmatter prefix ("" when none)
+    sections: Iterable[SectionNode],  # The note's Section nodes (any order; sorted by `order` here)
+) -> str:  # The reconstructed file text
+    """Reassemble a note's exact file text from its verbatim parts (lossless mode).
+
+    `frontmatter_raw + ''.join(s.raw for s in sorted-by-order)`. Requires sections
+    decomposed `lossless=True` (each carries its heading-inclusive `raw` span, with
+    a level-0 preamble at order 0); a Scope-A section set has empty `raw` and will
+    NOT round-trip — that is the mode boundary, not a bug."""
+    ordered = sorted(sections, key=lambda s: s.order)
+    return frontmatter_raw + "".join(s.raw for s in ordered)
+
+
+def note_text_from_graph_nodes(
+    note_node: Any,                # The queried `Note` graph node (typed GraphNode or wire dict)
+    section_nodes: Iterable[Any],  # The note's queried `Section` graph nodes
+) -> str:  # The reconstructed file text (the self-hosting round-trip path)
+    """Reconstruct a note's file text FROM the graph (frontmatter_raw + ordered raw spans).
+
+    Reads `frontmatter_raw` off the Note and each Section's `raw`/`order` off the
+    queried nodes — the projection reads the GRAPH, not the in-memory extraction
+    (the same loop-closing move as `render_memory_index_from_graph_nodes`)."""
+    frontmatter_raw = _node_field(note_node, "frontmatter_raw", "") or ""
+    spans = sorted(
+        ((int(_node_field(s, "order", 0) or 0), _node_field(s, "raw", "") or "")
+         for s in section_nodes),
+        key=lambda t: t[0],
+    )
+    return frontmatter_raw + "".join(raw for _, raw in spans)

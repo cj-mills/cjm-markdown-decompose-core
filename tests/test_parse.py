@@ -32,6 +32,15 @@ def test_split_frontmatter_absent():
     assert body == "# Just a heading\n"
 
 
+def test_parse_markdown_frontmatter_raw_is_lossless_prefix():
+    p = parse_markdown(DOC)
+    # The verbatim prefix + body reconstructs the document byte-for-byte (the M1 source).
+    assert p.frontmatter_raw + p.body == DOC
+    assert p.frontmatter_raw.startswith("---\nname:") and p.frontmatter_raw.endswith("---\n")
+    # No frontmatter -> empty prefix, body is the whole document.
+    assert parse_markdown("# Just a heading\n").frontmatter_raw == ""
+
+
 def test_parse_frontmatter_handles_colons_and_nesting():
     fm = parse_frontmatter(split_frontmatter(DOC)[0])
     assert fm["name"] == "self-hosting-graph-arc"

@@ -102,6 +102,7 @@ def note_from_parsed(
     corpus_root: Optional[str] = None,  # Root for the fallback slug
     profile: Optional[str] = None,      # Relationship-harvest profile (None = auto-detect)
     with_sections: bool = False,        # Also decompose the body into Section nodes (notes corpus; off for the memory/dev corpus)
+    lossless: bool = False,             # Lossless body-on-graph mode (memory corpus): verbatim per-section `raw` spans + level-0 preamble + verbatim `frontmatter_raw`, so the file round-trips byte-for-byte (M1). Implies sectioning
 ) -> NoteNode:  # The coarse Note node
     """Build a coarse `NoteNode` from already-parsed Markdown.
 
@@ -109,10 +110,15 @@ def note_from_parsed(
     harvesters (`relations`) add the corpus's real relationship signals —
     categories, series membership, cross-post links, aliases — selected by the
     detected (or given) source profile. A cross-post link to THIS post's own
-    section is dropped (a self-reference is not a cross-post edge). When
-    `with_sections`, the body is also decomposed into ordered `Section` nodes
-    (opt-in: the navigable prose unit for the notes corpus; left off for the
-    memory/dev corpus, which is already note-grained and would balloon)."""
+    section is dropped (a self-reference is not a cross-post edge).
+
+    Body content comes on-graph in one of two opt-in modes. `with_sections`
+    (Scope A, the notes corpus) decomposes the body into navigable `Section` nodes
+    at the section grain. `lossless` (M1, the high-stakes memory corpus) is the
+    stronger form: it sections too, but each section carries its heading-inclusive
+    verbatim `raw` span and the Note carries the verbatim `frontmatter_raw`, so the
+    file reconstructs byte-for-byte (`frontmatter_raw + ''.join(s.raw in order)`).
+    Both are off for plain coarse ingestion."""
     fm = parsed.frontmatter
     slug = slug_from(path, fm, corpus_root)
     description = fm.get("description")
@@ -133,9 +139,10 @@ def note_from_parsed(
         series_refs=rel.series_refs,
         aliases=rel.aliases,
         cross_post_refs=cross,
+        frontmatter_raw=parsed.frontmatter_raw if lossless else "",
     )
-    if with_sections:
-        note.sections = decompose_sections(parsed.body, note.id, path)
+    if with_sections or lossless:
+        note.sections = decompose_sections(parsed.body, note.id, path, lossless=lossless)
     return note
 
 
@@ -145,10 +152,11 @@ def note_from_text(
     corpus_root: Optional[str] = None,  # Root for the fallback slug
     profile: Optional[str] = None,      # Relationship-harvest profile (None = auto-detect)
     with_sections: bool = False,        # Also decompose the body into Section nodes
+    lossless: bool = False,             # Lossless body-on-graph mode (memory corpus); see note_from_parsed
 ) -> NoteNode:  # The coarse Note node
     """Parse + map in one step from in-memory text (hashes the UTF-8 bytes)."""
     return note_from_parsed(path, SourceRef.compute_hash(text.encode("utf-8")),
-                            parse_markdown(text), corpus_root, profile, with_sections)
+                            parse_markdown(text), corpus_root, profile, with_sections, lossless)
 
 
 def note_from_file(
@@ -156,6 +164,7 @@ def note_from_file(
     corpus_root: Optional[str] = None,  # Root for the fallback slug
     profile: Optional[str] = None,      # Relationship-harvest profile (None = auto-detect)
     with_sections: bool = False,        # Also decompose the body into Section nodes
+    lossless: bool = False,             # Lossless body-on-graph mode (memory corpus); see note_from_parsed
 ) -> NoteNode:  # The coarse Note node
     """Read a Markdown file and map it to a coarse `NoteNode`.
 
@@ -163,4 +172,4 @@ def note_from_file(
     stored); the text is decoded as UTF-8 for parsing."""
     raw = Path(path).read_bytes()
     return note_from_parsed(path, SourceRef.compute_hash(raw),
-                            parse_markdown(raw.decode("utf-8")), corpus_root, profile, with_sections)
+                            parse_markdown(raw.decode("utf-8")), corpus_root, profile, with_sections, lossless)
