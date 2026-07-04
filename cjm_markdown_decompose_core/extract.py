@@ -8,14 +8,13 @@ markdown corpus meets the dev schema.
 """
 
 import datetime
-import os
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 from cjm_context_graph_primitives.provenance import SourceRef
 from cjm_dev_graph_schema.nodes import NoteNode
 
-from .parse import ParsedMarkdown, parse_markdown
+from .parse import parse_markdown, ParsedMarkdown
 from .relations import harvest_relations
 from .sections import decompose_sections
 
