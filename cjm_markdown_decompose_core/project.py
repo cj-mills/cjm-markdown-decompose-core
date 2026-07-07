@@ -129,7 +129,8 @@ _DEFAULT_HOW_TO_PULL = (
     "## How to pull\n"
     "1. At task start, run `relevant \"<task>\"` — it ranks by structural nearness "
     "(decisions, notes, code, cross-links), richer than any static list.\n"
-    "2. `show <id>` to read a node in full + its neighbours.\n"
+    "2. `show <id>` for a node's STRUCTURE — title + neighbours, NOT its body; `read <id>` DELIVERS\n"
+    "   the verbatim body. Pull BOTH on any node you are about to act on.\n"
     "3. If a landmark above names your area, use its query hint as a starting point.\n"
     "4. Treat what you pull as the live source of truth; this surface is only the map."
 )
