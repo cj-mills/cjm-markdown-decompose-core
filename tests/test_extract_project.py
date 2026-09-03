@@ -165,3 +165,22 @@ def test_render_onboarding_surface_coverage_augments_landmark_map():
     # Absent coverage -> unchanged (back-compat).
     assert "Graph at a glance" not in render_onboarding_surface(notes, ["a-project"],
                                                                 [("Dialect", "dialect")], "LEAD.")
+
+
+def test_explicit_slug_pins_note_and_section_identity():
+    # a42c0f97: a born post's permalink is KNOWN to its caller — pinning it beats
+    # re-deriving from a parent-dir-relative path (which flattens nested permalinks).
+    doc = "---\ntitle: T\ndate: 2026-09-03\ncategories: [x]\n---\n\nlede\n\n## Part\n\nbody\n"
+    derived = note_from_text("/emit/series/part-1/index.md", doc,
+                             corpus_root="/emit/series/part-1", lossless=True)
+    assert derived.slug == "part-1"                       # parent-dir fallback flattens
+    pinned = note_from_text("/emit/series/part-1/index.md", doc,
+                            corpus_root="/emit/series/part-1", lossless=True,
+                            slug="series/part-1")
+    assert pinned.slug == "series/part-1"
+    assert pinned.id == note_node_id("series/part-1")
+    assert all(s.note_id == pinned.id for s in pinned.sections)
+    # Same identity as the corpus-root parse an ingest would do
+    ingested = note_from_text("/emit/series/part-1/index.md", doc, corpus_root="/emit", lossless=True)
+    assert ingested.id == pinned.id
+    assert [s.id for s in ingested.sections] == [s.id for s in pinned.sections]

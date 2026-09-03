@@ -102,8 +102,15 @@ def note_from_parsed(
     profile: Optional[str] = None,      # Relationship-harvest profile (None = auto-detect)
     with_sections: bool = False,        # Also decompose the body into Section nodes (notes corpus; off for the memory/dev corpus)
     lossless: bool = False,             # Lossless body-on-graph mode (memory corpus): verbatim per-section `raw` spans + level-0 preamble + verbatim `frontmatter_raw`, so the file round-trips byte-for-byte (M1). Implies sectioning
+    slug: Optional[str] = None,         # Explicit identity override (a born note whose permalink is KNOWN); None = derive via slug_from
 ) -> NoteNode:  # The coarse Note node
     """Build a coarse `NoteNode` from already-parsed Markdown.
+
+    `slug` (2026-09-03, work item a42c0f97) lets a caller that already KNOWS the note's
+    identity — a post born on-graph under an emit root as `<root>/<permalink>/index.md`,
+    or a re-decompose of an existing note — pin it instead of re-deriving it from the
+    path, so nested permalinks and parent-dir-relative parses can never drift the Note
+    (and therefore every Section) id. Explicit identity wins; None keeps `slug_from`.
 
     Beyond the coarse identity/metadata, the per-source-type relationship
     harvesters (`relations`) add the corpus's real relationship signals —
@@ -119,7 +126,7 @@ def note_from_parsed(
     file reconstructs byte-for-byte (`frontmatter_raw + ''.join(s.raw in order)`).
     Both are off for plain coarse ingestion."""
     fm = parsed.frontmatter
-    slug = slug_from(path, fm, corpus_root)
+    slug = slug or slug_from(path, fm, corpus_root)
     description = fm.get("description")
     rel = harvest_relations(parsed, profile)
     own = {slug, Path(path).parent.name}  # this post's own permalink (both namespaces)
@@ -152,10 +159,12 @@ def note_from_text(
     profile: Optional[str] = None,      # Relationship-harvest profile (None = auto-detect)
     with_sections: bool = False,        # Also decompose the body into Section nodes
     lossless: bool = False,             # Lossless body-on-graph mode (memory corpus); see note_from_parsed
+    slug: Optional[str] = None,         # Explicit identity override; see note_from_parsed
 ) -> NoteNode:  # The coarse Note node
     """Parse + map in one step from in-memory text (hashes the UTF-8 bytes)."""
     return note_from_parsed(path, SourceRef.compute_hash(text.encode("utf-8")),
-                            parse_markdown(text), corpus_root, profile, with_sections, lossless)
+                            parse_markdown(text), corpus_root, profile, with_sections, lossless,
+                            slug=slug)
 
 
 def note_from_file(
@@ -164,6 +173,7 @@ def note_from_file(
     profile: Optional[str] = None,      # Relationship-harvest profile (None = auto-detect)
     with_sections: bool = False,        # Also decompose the body into Section nodes
     lossless: bool = False,             # Lossless body-on-graph mode (memory corpus); see note_from_parsed
+    slug: Optional[str] = None,         # Explicit identity override; see note_from_parsed
 ) -> NoteNode:  # The coarse Note node
     """Read a Markdown file and map it to a coarse `NoteNode`.
 
@@ -171,4 +181,5 @@ def note_from_file(
     stored); the text is decoded as UTF-8 for parsing."""
     raw = Path(path).read_bytes()
     return note_from_parsed(path, SourceRef.compute_hash(raw),
-                            parse_markdown(raw.decode("utf-8")), corpus_root, profile, with_sections, lossless)
+                            parse_markdown(raw.decode("utf-8")), corpus_root, profile, with_sections, lossless,
+                            slug=slug)
