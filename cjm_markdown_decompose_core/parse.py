@@ -23,6 +23,10 @@ _HEADING_RE = re.compile(r"^(#{1,6})[ \t]+(.*?)[ \t]*#*[ \t]*$", re.MULTILINE)
 # fenced blocks first (multi-line), then inline backtick runs (single-line).
 _FENCED_CODE_RE = re.compile(r"```.*?```", re.DOTALL)
 _INLINE_CODE_RE = re.compile(r"(`+)(?:.+?)\1")
+# A fenced-code delimiter line (CommonMark): up to 3 spaces of indent, then a run of
+# 3+ backticks or 3+ tildes, then whatever follows (an opener's info string; a closer
+# allows only whitespace). `fenced_code_spans` pairs openers with closers.
+_FENCE_LINE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
 
 
 @dataclass
@@ -72,6 +76,53 @@ def strip_code(
     return _INLINE_CODE_RE.sub(" ", _FENCED_CODE_RE.sub(" ", body))
 
 
+def fenced_code_spans(
+    body: str,  # Document body
+) -> List[Tuple[int, int]]:  # [(start, end)] character spans of fenced code blocks, in document order
+    """Locate fenced code blocks (``` / ~~~) as character spans of the body.
+
+    CommonMark fence rules at the grain that matters here: an opener is a line of
+    3+ backticks or 3+ tildes (up to 3 spaces of indent; a backtick opener's info
+    string may not itself contain a backtick), the block runs to the first line
+    holding a closer of the same character at least as long as the opener with
+    nothing else on it, and an unclosed fence runs to the end of the body. These
+    spans are what heading detection SKIPS: a `# comment` line inside a
+    ```python block is code, not an ATX heading (finding c1b976d0 — 3,414 such
+    phantom headings across 81 of 207 posts; the timm tutorial's `# Function to
+    run ...` opened a Section mid-code, losing the fence)."""
+    spans: List[Tuple[int, int]] = []
+    open_char, open_len, open_start = "", 0, 0
+    pos = 0
+    for line in body.splitlines(keepends=True):
+        m = _FENCE_LINE_RE.match(line)
+        if m:
+            run, rest = m.group(1), m.group(2)
+            if not open_char:
+                if not (run[0] == "`" and "`" in rest):
+                    open_char, open_len, open_start = run[0], len(run), pos
+            elif run[0] == open_char and len(run) >= open_len and not rest.strip():
+                spans.append((open_start, pos + len(line)))
+                open_char = ""
+        pos += len(line)
+    if open_char:
+        spans.append((open_start, len(body)))
+    return spans
+
+
+def find_headings(
+    body: str,  # Document body
+) -> List["re.Match[str]"]:  # ATX heading matches (group 1 = hashes, group 2 = text), fenced code skipped
+    """The body's ATX heading matches, skipping every line inside a fenced code block.
+
+    The ONE heading detector both `extract_headings` and the section splitter
+    (`sections.decompose_sections`) read, so a `#` line inside a fence is never a
+    heading on either path. Matches carry positions (`start`/`end`) so the splitter
+    can slice section bodies between consecutive headings."""
+    spans = fenced_code_spans(body)
+    return [m for m in _HEADING_RE.finditer(body)
+            if not any(s <= m.start() < e for s, e in spans)]
+
+
 def extract_wiki_links(
     body: str,  # Document body
 ) -> List[str]:  # `[[link]]` targets, de-duplicated in first-seen order
@@ -92,7 +143,7 @@ def extract_headings(
     body: str,  # Document body
 ) -> List[Tuple[int, str]]:  # (level, text) per ATX heading, in document order
     """Extract ATX headings (`#`..`######`) as (level, text) pairs."""
-    return [(len(m.group(1)), m.group(2).strip()) for m in _HEADING_RE.finditer(body)]
+    return [(len(m.group(1)), m.group(2).strip()) for m in find_headings(body)]
 
 
 def parse_markdown(

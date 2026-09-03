@@ -24,9 +24,11 @@ from typing import List
 from cjm_context_graph_primitives.provenance import SourceRef
 from cjm_dev_graph_schema.nodes import SectionNode
 
-# An ATX heading line: 1-6 `#`, the text, optional trailing `#`s (captured with
-# positions so the section body can be sliced between consecutive headings).
-_HEADING_LINE_RE = re.compile(r"(?m)^(#{1,6})[ \t]+(.*?)[ \t]*#*[ \t]*$")
+from .parse import find_headings
+
+
+# Heading detection lives in `parse.find_headings` (fence-aware, positions kept so
+# the section body can be sliced between consecutive headings).
 
 
 def heading_anchor(
@@ -76,9 +78,10 @@ def decompose_sections(
     (order 0; headed sections shift to order 1+). Then `frontmatter_raw + ''.join(
     s.raw for s in order)` reproduces the file byte-for-byte (M1's content-fidelity
     gate). The `raw`-span slicing is exact regardless of whether a matched `#` is a
-    "real" heading (e.g. inside a code fence), so round-trip never depends on the
-    heading heuristic being perfect."""
-    matches = list(_HEADING_LINE_RE.finditer(body))
+    "real" heading, so round-trip never depends on the heading heuristic being
+    perfect. Headings come from `parse.find_headings`, which SKIPS fenced code: a
+    `# comment` inside a ```python block never opens a section (finding c1b976d0)."""
+    matches = find_headings(body)
     sections: List[SectionNode] = []
     base_order = 0            # headed sections start here (bumped to 1 when a preamble is emitted)
     if lossless:

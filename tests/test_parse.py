@@ -1,7 +1,8 @@
 """Schema-free Markdown parsing."""
 
 from cjm_markdown_decompose_core.parse import (
-    extract_headings, extract_wiki_links, parse_frontmatter, parse_markdown, split_frontmatter,
+    extract_headings, extract_wiki_links, fenced_code_spans, find_headings, parse_frontmatter,
+    parse_markdown, split_frontmatter,
 )
 
 DOC = """---
@@ -71,6 +72,42 @@ def test_extract_wiki_links_ignores_code_spans():
 
 def test_extract_headings():
     assert extract_headings(DOC) == [(1, "Heading One"), (2, "Heading Two")]
+
+
+def test_fenced_code_spans_backtick_tilde_and_unclosed():
+    body = ("intro\n"
+            "```python\n# not a heading\nx = 1\n```\n"
+            "mid\n"
+            "~~~\n## also not a heading\n~~~\n"
+            "  ````md\n```\n# nested fence stays open until a 4-run closer\n````\n"
+            "tail\n"
+            "```\n# unclosed fence runs to the end\n")
+    spans = fenced_code_spans(body)
+    assert len(spans) == 4
+    starts = [body[s:s + 16] for s, _ in spans]
+    assert starts[0].startswith("```python") and starts[1].startswith("~~~")
+    assert starts[2].startswith("  ````md") and starts[3].startswith("```\n# unclosed")
+    # A backtick opener whose info string carries a backtick is NOT a fence (CommonMark),
+    # so the `# heading` after it stays a heading (the later ``` line opens a new fence).
+    odd = "``` a`b\n# heading\n```\n"
+    assert fenced_code_spans(odd) == [(18, 22)]
+    assert [m.group(2) for m in find_headings(odd)] == ["heading"]
+    # Closers must be at least as long as the opener: the inner ``` did not close ````.
+    inner = body.index("# nested fence")
+    assert any(s <= inner < e for s, e in spans)
+    # Unclosed: the last span reaches the end of the body.
+    assert spans[-1][1] == len(body)
+
+
+def test_headings_inside_fenced_code_are_not_headings():
+    body = ("# Real\n"
+            "```python\n# Function to run a single epoch\ndef run_epoch():\n    pass\n```\n"
+            "## Also real\n"
+            "~~~\n### tilde-fenced\n~~~\n")
+    assert extract_headings(body) == [(1, "Real"), (2, "Also real")]
+    assert [m.group(2) for m in find_headings(body)] == ["Real", "Also real"]
+    # The parse_markdown surface agrees (the finding's symptom: a mid-code Section).
+    assert parse_markdown(body).headings == [(1, "Real"), (2, "Also real")]
 
 
 def test_parse_markdown_end_to_end():

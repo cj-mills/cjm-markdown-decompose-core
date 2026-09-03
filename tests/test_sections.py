@@ -62,6 +62,34 @@ def test_section_text_is_verbatim_immediate_prose():
     assert "Install steps." in by_anchor["install"].text
 
 
+def test_fenced_code_comment_does_not_open_a_section():
+    # c1b976d0: a `# comment` inside a ```python fence used to open a Section
+    # mid-code, so the enclosing section's text ended with a stray opening fence
+    # and the phantom section began with code and a stray closing fence.
+    body = ("# Training\n\nDefine the loop.\n\n"
+            "```python\n# Function to run a single training/validation epoch\n"
+            "def run_epoch():\n    pass\n```\n\n"
+            "# Evaluation\n\nEval prose.\n")
+    secs = decompose_sections(body, note_node_id("p"))
+    assert [s.anchor for s in secs] == ["training", "evaluation"]
+    training = secs[0].text
+    assert "```python\n# Function to run" in training and training.count("```") == 2
+    # Lossless mode still round-trips byte-exact with the fence-aware boundaries.
+    lossless = decompose_sections(body, note_node_id("p"), lossless=True)
+    assert "".join(s.raw for s in lossless) == body
+    assert [s.anchor for s in lossless] == ["training", "evaluation"]
+
+
+def test_display_math_heading_is_source_faithful():
+    # c1b976d0 part (2) is NOT a splitter defect: the transformers-book ch. 6 post
+    # literally writes `### $$BR = ...$$` as its heading, so a math-bearing title is
+    # the author's markdown, kept verbatim (the anchor slugs it like any heading).
+    body = "### $$BR = min(1, e^{x})$$\n* bullet\n"
+    secs = decompose_sections(body, note_node_id("p"))
+    assert [s.title for s in secs] == ["$$BR = min(1, e^{x})$$"]
+    assert secs[0].level == 3 and secs[0].text == "\n* bullet\n"
+
+
 def test_duplicate_heading_anchor_disambiguated():
     secs = decompose_sections(DOC, note_node_id("p"))
     anchors = [s.anchor for s in secs]
