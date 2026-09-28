@@ -18,6 +18,7 @@ A Markdown decomposition core for context graphs: parses Markdown content (front
 
 ### `cjm_markdown_decompose_core.extract`
 
+- `corpus_index_files` _function_ — Every `<dir>/index.md` or `<dir>/index.qmd` under the root, one per post directory.
 - `note_from_file` _function_ — Read a Markdown file and map it to a coarse `NoteNode`.
 - `note_from_parsed` _function_ — Build a coarse `NoteNode` from already-parsed Markdown.
 - `note_from_text` _function_ — Parse + map in one step from in-memory text (hashes the UTF-8 bytes).
@@ -61,7 +62,9 @@ A Markdown decomposition core for context graphs: parses Markdown content (front
 - `harvest_cross_post_links` _function_ — Harvest `/posts/...` markdown links -> (permalink, section anchor) pairs.
 - `harvest_relations` _function_ — Harvest a note's relationships using its (detected or given) source profile.
 - `harvest_series_links` _function_ — Harvest `/series/...` markdown links -> series keys (the membership signal).
+- `is_site_link` _function_ — A link into the site: relative or rooted, or an absolute URL on the site's own host.
 - `normalize_permalink` _function_ — Reduce a post link to its bare permalink — the path AFTER `posts/`.
+- `quarto_site_url` _function_ — The site URL of the Quarto project a file belongs to (ruling 260119bf).
 - `slugify` _function_ — Normalize a category/tag to a stable key (lowercased, separators collapsed).
 
 ### `cjm_markdown_decompose_core.sections`
