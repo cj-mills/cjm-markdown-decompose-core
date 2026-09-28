@@ -1,7 +1,6 @@
 """Corpus -> graph elements, and projecting the index back from graph nodes."""
 
-from cjm_dev_graph_schema.identity import (note_node_id, series_node_id,
-                                           topic_node_id)
+from cjm_dev_graph_schema.identity import note_node_id, topic_node_id
 from cjm_dev_graph_schema.vocab import DevNodeKinds, DevRelations
 from cjm_markdown_decompose_core.extract import note_from_text
 from cjm_markdown_decompose_core.ingest import corpus_graph_elements
@@ -79,13 +78,16 @@ def _books():
             note_from_text("/c/posts/dumbing-us-down-book-notes/index.md", BOOK_B, corpus_root="/c/posts")]
 
 
-def test_topic_and_series_nodes_are_deduped_across_notes():
+def test_topics_are_deduped_and_no_series_is_minted():
     nodes, edges = corpus_graph_elements(_books())
     labels = [n["label"] for n in nodes]
-    # 2 Notes + 2 shared Topics (education, history) + 1 shared Series (deduped).
+    # 2 Notes + 2 shared Topics (education, history); the series-page link mints NO Series —
+    # a Series is born by a journaled op (DEC 72d669c5), the link rides the note's site_refs.
     assert labels.count(DevNodeKinds.NOTE) == 2
     assert labels.count(DevNodeKinds.TOPIC) == 2
-    assert labels.count(DevNodeKinds.SERIES) == 1
+    assert labels.count(DevNodeKinds.SERIES) == 0
+    notes = [n for n in nodes if n["label"] == DevNodeKinds.NOTE]
+    assert all(n["properties"]["site_refs"] == ["/series/notes/education-notes.html"] for n in notes)
     topic_ids = {n["id"] for n in nodes if n["label"] == DevNodeKinds.TOPIC}
     assert topic_ids == {topic_node_id("education"), topic_node_id("history")}
 
@@ -94,9 +96,9 @@ def test_both_books_converge_on_shared_facets():
     _, edges = corpus_graph_elements(_books())
     tagged = [e for e in edges if e["relation_type"] == DevRelations.TAGGED]
     in_series = [e for e in edges if e["relation_type"] == DevRelations.IN_SERIES]
-    # Both books TAGGED education+history (4 edges) and IN_SERIES the one series (2 edges).
-    assert len(tagged) == 4 and len(in_series) == 2
-    assert {e["target_id"] for e in in_series} == {series_node_id("education-notes")}
+    # Both books TAGGED education+history (4 edges); an in-body series link is never
+    # membership (ruling 0f9ee9a8 (2)), so ingest emits no IN_SERIES at all.
+    assert len(tagged) == 4 and in_series == []
     # The cross-post link (learning-game -> dumbing-us-down) is a REFERENCES edge.
     refs = [e for e in edges if e["relation_type"] == DevRelations.REFERENCES]
     assert any(e["target_id"] == note_node_id("dumbing-us-down-book-notes")

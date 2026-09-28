@@ -2,7 +2,7 @@
 
 The `[[wiki-link]]` model (`parse.extract_wiki_links`) fits the memory corpus but
 finds ~noise on richer corpora: a Quarto blog post encodes its real relationships
-through frontmatter `categories`, `/series/...` membership links, `/posts/...`
+through frontmatter `categories`, `/series/...` page links, `/posts/...`
 cross-post links (with section anchors), and `aliases` — none of which are
 `[[wiki-links]]`. This module adds COMPOSABLE harvesters for those signals plus a
 PROFILE dispatch that selects which harvesters run for a given source type.
@@ -185,27 +185,21 @@ def harvest_cross_post_links(
 def harvest_series_links(
     body: str,                       # Document body
     site_url: Optional[str] = None,  # The site's own URL (quarto_site_url); None = every absolute URL is external
-) -> List[str]:  # Series keys (de-duplicated, order-preserved)
-    """Harvest `/series/...` markdown links -> series keys (the membership signal).
+) -> List[str]:  # Verbatim link targets (de-duplicated, order-preserved)
+    """Harvest `/series/...` markdown links -> their VERBATIM targets (a page reference).
 
-    The series key is the link's final path segment without its extension
-    (`/series/notes/education-notes.html` -> `education-notes`). These survive the
-    callout flattening that drops the `:::`-fence structure (the link text is gone,
-    but the link target — the real signal — is recovered here from the raw body).
-    Only site links count (`is_site_link`): an external URL with a `/series/` segment
-    is another site's series, never a Series of this one (finding 0fadbbbd)."""
+    A link to a series page is a CROSS-REFERENCE, never membership (ruling 0f9ee9a8 (2)):
+    membership is journaled intent on the Series. What the page IS (a series, or a topic
+    listing) is not knowable here — it lives in site_path facts the journal replays after
+    ingest — so the target is kept verbatim and the post-replay resolve pass maps it
+    (DEC 72d669c5). The targets survive the callout flattening that drops the `:::`-fence
+    structure (recovered here from the raw body). Only site links count (`is_site_link`):
+    an external URL with a `/series/` segment is another site's page (finding 0fadbbbd)."""
     seen: Dict[str, None] = {}
     for m in _MD_LINK_RE.finditer(strip_code(body)):
         target = m.group(1)
-        if not is_site_link(target, site_url):
-            continue
-        sm = _SERIES_RE.search(target)
-        if not sm:
-            continue
-        last = sm.group(1).split("#", 1)[0].rstrip("/").split("/")[-1]
-        key = re.sub(r"\.html?$", "", last)
-        if key:
-            seen.setdefault(key, None)
+        if is_site_link(target, site_url) and _SERIES_RE.search(target):
+            seen.setdefault(target, None)
     return list(seen)
 
 
@@ -213,7 +207,7 @@ def harvest_series_links(
 class NoteRelations:
     """The harvested relationship signals for one note (beyond `[[wiki-links]]`)."""
     categories: List[str] = field(default_factory=list)       # Normalized Topic keys
-    series_refs: List[str] = field(default_factory=list)      # Series keys this note belongs to
+    site_refs: List[str] = field(default_factory=list)        # Verbatim site-link targets the resolve pass maps (series pages today)
     aliases: List[str] = field(default_factory=list)          # Alternate-identity permalinks
     cross_post_refs: List[Tuple[str, str]] = field(default_factory=list)  # (permalink, anchor) cross-post links
 
@@ -225,14 +219,14 @@ _Harvester = Callable[[Dict[str, Any], str, Optional[str]], NoteRelations]
 
 
 def _quarto_harvest(fm: Dict[str, Any], body: str, source_path: Optional[str] = None) -> NoteRelations:
-    """The Quarto blog-post profile: categories + series + cross-post + aliases.
+    """The Quarto blog-post profile: categories + series-page links + cross-post + aliases.
 
-    Series and cross-post links count only when they point into the post's own site,
+    Series-page and cross-post links count only when they point into the post's own site,
     whose URL the post's Quarto project names (`quarto_site_url`, ruling 260119bf)."""
     site_url = quarto_site_url(source_path)
     return NoteRelations(
         categories=harvest_categories(fm),
-        series_refs=harvest_series_links(body, site_url),
+        site_refs=harvest_series_links(body, site_url),
         aliases=harvest_aliases(fm),
         cross_post_refs=harvest_cross_post_links(body, site_url),
     )

@@ -74,9 +74,13 @@ def test_harvest_cross_post_links_with_anchors_and_code_stripped():
     assert all(p != "should-be-ignored" for p, _ in refs)
 
 
-def test_harvest_series_links():
+def test_harvest_series_links_keeps_the_verbatim_target():
+    # A series-page link is a cross-reference kept VERBATIM for the post-replay resolve pass
+    # (DEC 72d669c5): what the page is lives in site_path facts, never in the link's shape.
     body = parse_markdown(QUARTO_POST).body
-    assert harvest_series_links(body) == ["education-notes"]
+    assert harvest_series_links(body) == ["/series/notes/education-notes.html"]
+    twice = "[a](/series/notes/x.html) [b](/series/notes/x.html) [c](/series/notes/x.html#part)"
+    assert harvest_series_links(twice) == ["/series/notes/x.html", "/series/notes/x.html#part"]
 
 
 def test_only_site_links_harvest_series_and_cross_posts():
@@ -88,7 +92,8 @@ def test_only_site_links_harvest_series_and_cross_posts():
             "[own series](https://christianjmills.com/series/notes/education-notes.html) "
             "[rooted](/posts/y/) [mail](mailto:me@example.com)")
     site = "https://christianjmills.com"
-    assert harvest_series_links(body, site) == ["education-notes"]
+    assert harvest_series_links(body, site) == [
+        "https://christianjmills.com/series/notes/education-notes.html"]
     assert harvest_cross_post_links(body, site) == [("x", "a"), ("y", "")]
     # With no known site URL every absolute URL is external; rooted links still count.
     assert harvest_series_links(body) == []
@@ -114,7 +119,8 @@ def test_quarto_site_url_from_the_nearest_project(tmp_path):
     doc = ("---\ntitle: P\ndate: 2024-1-1\n---\n"
            "[own](https://christianjmills.com/series/notes/education-notes.html) "
            "[other](https://www.pinecone.io/learn/series/faiss/hnsw/)\n")
-    assert note_from_text(post, doc, corpus_root=str(site / "posts")).series_refs == ["education-notes"]
+    assert note_from_text(post, doc, corpus_root=str(site / "posts")).site_refs == [
+        "https://christianjmills.com/series/notes/education-notes.html"]
 
 
 def test_detect_profile():
@@ -125,7 +131,7 @@ def test_detect_profile():
 
 def test_harvest_relations_dispatches_by_profile():
     rel = harvest_relations(parse_markdown(QUARTO_POST))
-    assert rel.categories and rel.series_refs and rel.aliases and rel.cross_post_refs
+    assert rel.categories and rel.site_refs and rel.aliases and rel.cross_post_refs
     mem = harvest_relations(parse_markdown(MEMORY_DOC))
     assert mem == type(mem)()  # memory profile harvests nothing extra (wiki-links via parse)
 
@@ -140,12 +146,12 @@ def test_extract_drops_self_reference_cross_post_link():
     assert "pytorch-train-object-detector-yolox-tutorial" not in targets
     assert "google-colab-getting-started-tutorial" in targets
     assert note.categories == ["pytorch", "object-detection", "yolox", "tutorial"]
-    assert note.series_refs == ["education-notes"]
+    assert note.site_refs == ["/series/notes/education-notes.html"]
 
 
 def test_memory_corpus_unaffected():
     note = note_from_text("memory/some.md", MEMORY_DOC)
-    assert note.categories == [] and note.series_refs == [] and note.cross_post_refs == []
+    assert note.categories == [] and note.site_refs == [] and note.cross_post_refs == []
     assert note.references == ["other-memory"]  # wiki-links still work
 
 

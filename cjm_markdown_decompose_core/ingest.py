@@ -9,7 +9,7 @@ flattening here makes it reusable and unit-testable without a running graph.
 
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from cjm_dev_graph_schema.nodes import NoteNode, SeriesNode, TopicNode
+from cjm_dev_graph_schema.nodes import NoteNode, TopicNode
 
 
 def corpus_graph_elements(
@@ -19,12 +19,13 @@ def corpus_graph_elements(
     """Collect notes into the node + edge wire-dict lists `extend_graph` expects.
 
     One `Note` node per file plus its relationship edges — `REFERENCES`
-    (`[[wiki-links]]` + cross-post links), `TAGGED` (categories), `IN_SERIES`
-    (series membership) — and, when the note was decomposed `with_sections`, its
-    `Section` nodes + `HAS_SECTION`/`PART_OF` edges (the body content + hierarchy).
-    The shared facet nodes (`Topic` per category, `Series` per series) are emitted
-    ONCE, deduped across the corpus, so independent notes sharing a category/series
-    converge on one node. Deterministic ids make the result idempotent under
+    (`[[wiki-links]]` + cross-post links) and `TAGGED` (categories) — and, when the note
+    was decomposed `with_sections`, its `Section` nodes + `HAS_SECTION`/`PART_OF` edges
+    (the body content + hierarchy). The shared `Topic` facet per category is emitted ONCE,
+    deduped across the corpus, so independent notes sharing a category converge on one
+    node. No Series and no `IN_SERIES`: a Series is born by a journaled op and its
+    membership is journaled intent (DEC 72d669c5); a note's series-page links ride its
+    `site_refs` for the post-replay resolve pass. Deterministic ids make the result idempotent under
     `extend_graph` — re-ingesting collides into verified no-ops rather than
     duplicating.
 
@@ -34,20 +35,15 @@ def corpus_graph_elements(
     nodes: List[Dict[str, Any]] = []
     edges: List[Dict[str, Any]] = []
     topics: Dict[str, None] = {}   # distinct category keys (first-seen order)
-    series: Dict[str, None] = {}   # distinct series keys (first-seen order)
     for n in notes:
         nodes.append(n.to_graph_node())
         edges.extend(n.reference_edges(aliases))
         edges.extend(n.cross_post_edges(aliases))
         edges.extend(n.tagged_edges())
-        edges.extend(n.series_edges())
         for sec in n.sections:
             nodes.append(sec.to_graph_node())
             edges.extend(sec.structural_edges())
         for c in n.categories:
             topics.setdefault(c, None)
-        for s in n.series_refs:
-            series.setdefault(s, None)
     nodes.extend(TopicNode(key=k).to_graph_node() for k in topics)
-    nodes.extend(SeriesNode(key=k).to_graph_node() for k in series)
     return nodes, edges

@@ -114,7 +114,7 @@ def note_from_parsed(
 
     Beyond the coarse identity/metadata, the per-source-type relationship
     harvesters (`relations`) add the corpus's real relationship signals —
-    categories, series membership, cross-post links, aliases — selected by the
+    categories, series-page links, cross-post links, aliases — selected by the
     detected (or given) source profile. A cross-post link to THIS post's own
     section is dropped (a self-reference is not a cross-post edge).
 
@@ -142,7 +142,7 @@ def note_from_parsed(
         metadata={k: _json_safe(v) for k, v in fm.items()
                   if k not in ("name", "title", "description", "metadata")},
         categories=rel.categories,
-        series_refs=rel.series_refs,
+        site_refs=rel.site_refs,
         aliases=rel.aliases,
         cross_post_refs=cross,
         frontmatter_raw=parsed.frontmatter_raw if lossless else "",

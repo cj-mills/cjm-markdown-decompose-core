@@ -61,7 +61,7 @@ A Markdown decomposition core for context graphs: parses Markdown content (front
 - `harvest_categories` _function_ — Harvest `categories` -> normalized Topic keys (the thematic-clustering facet).
 - `harvest_cross_post_links` _function_ — Harvest `/posts/...` markdown links -> (permalink, section anchor) pairs.
 - `harvest_relations` _function_ — Harvest a note's relationships using its (detected or given) source profile.
-- `harvest_series_links` _function_ — Harvest `/series/...` markdown links -> series keys (the membership signal).
+- `harvest_series_links` _function_ — Harvest `/series/...` markdown links -> their VERBATIM targets (a page reference).
 - `is_site_link` _function_ — A link into the site: relative or rooted, or an absolute URL on the site's own host.
 - `normalize_permalink` _function_ — Reduce a post link to its bare permalink — the path AFTER `posts/`.
 - `quarto_site_url` _function_ — The site URL of the Quarto project a file belongs to (ruling 260119bf).
