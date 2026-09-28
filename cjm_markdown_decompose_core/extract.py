@@ -128,7 +128,7 @@ def note_from_parsed(
     fm = parsed.frontmatter
     slug = slug or slug_from(path, fm, corpus_root)
     description = fm.get("description")
-    rel = harvest_relations(parsed, profile)
+    rel = harvest_relations(parsed, profile, path)
     own = {slug, Path(path).parent.name}  # this post's own permalink (both namespaces)
     cross = [(p, a) for (p, a) in rel.cross_post_refs if p not in own]
     note = NoteNode(

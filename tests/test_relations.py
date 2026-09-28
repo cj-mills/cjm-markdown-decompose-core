@@ -4,7 +4,8 @@ from cjm_markdown_decompose_core.extract import note_from_text
 from cjm_markdown_decompose_core.parse import parse_markdown
 from cjm_markdown_decompose_core.relations import (
     detect_profile, harvest_aliases, harvest_categories, harvest_cross_post_links,
-    harvest_relations, harvest_series_links, normalize_permalink, slugify)
+    harvest_relations, harvest_series_links, is_site_link, normalize_permalink,
+    quarto_site_url, slugify)
 
 # A representative Quarto blog post (shape from christianjmills/posts).
 QUARTO_POST = """---
@@ -76,6 +77,44 @@ def test_harvest_cross_post_links_with_anchors_and_code_stripped():
 def test_harvest_series_links():
     body = parse_markdown(QUARTO_POST).body
     assert harvest_series_links(body) == ["education-notes"]
+
+
+def test_only_site_links_harvest_series_and_cross_posts():
+    # Another site's /series/ or /posts/ path is not a site relation (finding 0fadbbbd); the
+    # site's own absolute URL is (www. included), and relative/rooted links always are.
+    body = ("[hnsw](https://www.pinecone.io/learn/series/faiss/hnsw/) "
+            "[evals](https://hamel.dev/blog/posts/evals/) "
+            "[own](https://www.christianjmills.com/posts/x/#a) "
+            "[own series](https://christianjmills.com/series/notes/education-notes.html) "
+            "[rooted](/posts/y/) [mail](mailto:me@example.com)")
+    site = "https://christianjmills.com"
+    assert harvest_series_links(body, site) == ["education-notes"]
+    assert harvest_cross_post_links(body, site) == [("x", "a"), ("y", "")]
+    # With no known site URL every absolute URL is external; rooted links still count.
+    assert harvest_series_links(body) == []
+    assert harvest_cross_post_links(body) == [("y", "")]
+    assert is_site_link("../z/") and is_site_link("#anchor")
+    assert not is_site_link("https://christianjmills.com/posts/x/")
+
+
+def test_quarto_site_url_from_the_nearest_project(tmp_path):
+    # The site URL is the post's Quarto project's website.site-url (ruling 260119bf), found
+    # the way Quarto finds a file's project; the harvest reads it through the post's path.
+    site, bare = tmp_path / "site", tmp_path / "bare"
+    (site / "posts" / "p").mkdir(parents=True)
+    (bare / "posts" / "q").mkdir(parents=True)
+    (site / "_quarto.yml").write_text('website:\n  site-url: "https://christianjmills.com"\n')
+    (bare / "_quarto.yml").write_text("project:\n  type: website\n")
+    post = str(site / "posts" / "p" / "index.md")
+    assert quarto_site_url(post) == "https://christianjmills.com"
+    assert quarto_site_url(str(bare / "posts" / "q" / "index.md")) is None
+    assert quarto_site_url(str(tmp_path / "loose.md")) is None
+    assert quarto_site_url(None) is None
+
+    doc = ("---\ntitle: P\ndate: 2024-1-1\n---\n"
+           "[own](https://christianjmills.com/series/notes/education-notes.html) "
+           "[other](https://www.pinecone.io/learn/series/faiss/hnsw/)\n")
+    assert note_from_text(post, doc, corpus_root=str(site / "posts")).series_refs == ["education-notes"]
 
 
 def test_detect_profile():

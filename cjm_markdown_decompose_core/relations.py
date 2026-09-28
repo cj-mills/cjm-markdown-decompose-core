@@ -16,7 +16,11 @@ the `NoteNode` fields; this module returns plain data and carries no graph schem
 
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
+from urllib.parse import urlsplit
+
+import yaml
 
 from .parse import ParsedMarkdown, strip_code
 
@@ -84,6 +88,49 @@ def normalize_permalink(
     return tail or None
 
 
+def _bare_host(
+    host: Optional[str],  # A URL host (any case, maybe `www.`-prefixed)
+) -> str:  # The host lowercased, a leading `www.` dropped ('' when None)
+    """Normalize a host for same-site comparison: `www.christianjmills.com` IS the site."""
+    h = (host or "").lower()
+    return h[4:] if h.startswith("www.") else h
+
+
+def is_site_link(
+    target: str,                     # A markdown link target
+    site_url: Optional[str] = None,  # The site's own URL (its _quarto.yml site-url); None = unknown
+) -> bool:  # True when the target points into the site itself
+    """A link into the site: relative or rooted, or an absolute URL on the site's own host.
+
+    A path segment never decides it alone: `pinecone.io/learn/series/faiss/hnsw/` carries a
+    `/series/` segment and is another site (finding 0fadbbbd). A site links itself by
+    absolute URL too, so a scheme alone does not make a link external; with no known site
+    URL, every absolute URL is."""
+    parts = urlsplit(target)
+    if not parts.scheme and not parts.netloc:
+        return True
+    return bool(site_url) and _bare_host(parts.hostname) == _bare_host(urlsplit(site_url).hostname)
+
+
+def quarto_site_url(
+    path: Optional[str],  # A source file inside a Quarto project (None = unknown)
+) -> Optional[str]:  # The project's `website.site-url`, or None
+    """The site URL of the Quarto project a file belongs to (ruling 260119bf).
+
+    Read from the nearest `_quarto.yml` above the file, the way Quarto finds a file's
+    project, so every harvest (ingest, born notes, harvest-on-edit, replay) sees the value
+    Quarto itself renders with and no second copy exists to drift. None when no project is
+    found or it names no site-url."""
+    if not path:
+        return None
+    for d in Path(path).absolute().parents:
+        cfg = d / "_quarto.yml"
+        if cfg.is_file():
+            site = ((yaml.safe_load(cfg.read_text()) or {}).get("website") or {}).get("site-url")
+            return site.strip() if isinstance(site, str) and site.strip() else None
+    return None
+
+
 def harvest_categories(
     frontmatter: Dict[str, Any],  # Parsed frontmatter
 ) -> List[str]:  # Normalized category keys (de-duplicated, order-preserved)
@@ -112,16 +159,21 @@ def harvest_aliases(
 
 
 def harvest_cross_post_links(
-    body: str,  # Document body
+    body: str,                       # Document body
+    site_url: Optional[str] = None,  # The site's own URL (quarto_site_url); None = every absolute URL is external
 ) -> List[Tuple[str, str]]:  # (permalink, anchor) pairs, de-duplicated, order-preserved
     """Harvest `/posts/...` markdown links -> (permalink, section anchor) pairs.
 
     Code spans are stripped first (so URLs in example blocks are not mistaken for
-    references — the same guard the wiki-link extractor uses). The anchor is kept
-    (resolved to a section node later); de-duplication is on (permalink, anchor)."""
+    references — the same guard the wiki-link extractor uses). Only site links count
+    (`is_site_link`): another site's `/posts/` path is not a cross-post reference. The
+    anchor is kept (resolved to a section node later); de-duplication is on
+    (permalink, anchor)."""
     seen: Dict[Tuple[str, str], None] = {}
     for m in _MD_LINK_RE.finditer(strip_code(body)):
         target = m.group(1)
+        if not is_site_link(target, site_url):
+            continue
         permalink = normalize_permalink(target)
         if not permalink:
             continue
@@ -131,17 +183,23 @@ def harvest_cross_post_links(
 
 
 def harvest_series_links(
-    body: str,  # Document body
+    body: str,                       # Document body
+    site_url: Optional[str] = None,  # The site's own URL (quarto_site_url); None = every absolute URL is external
 ) -> List[str]:  # Series keys (de-duplicated, order-preserved)
     """Harvest `/series/...` markdown links -> series keys (the membership signal).
 
     The series key is the link's final path segment without its extension
     (`/series/notes/education-notes.html` -> `education-notes`). These survive the
     callout flattening that drops the `:::`-fence structure (the link text is gone,
-    but the link target — the real signal — is recovered here from the raw body)."""
+    but the link target — the real signal — is recovered here from the raw body).
+    Only site links count (`is_site_link`): an external URL with a `/series/` segment
+    is another site's series, never a Series of this one (finding 0fadbbbd)."""
     seen: Dict[str, None] = {}
     for m in _MD_LINK_RE.finditer(strip_code(body)):
-        sm = _SERIES_RE.search(m.group(1))
+        target = m.group(1)
+        if not is_site_link(target, site_url):
+            continue
+        sm = _SERIES_RE.search(target)
         if not sm:
             continue
         last = sm.group(1).split("#", 1)[0].rstrip("/").split("/")[-1]
@@ -160,28 +218,33 @@ class NoteRelations:
     cross_post_refs: List[Tuple[str, str]] = field(default_factory=list)  # (permalink, anchor) cross-post links
 
 
-# A profile = the harvesters that apply to a source type. A harvester takes
-# (frontmatter, body) and contributes to a NoteRelations via its target field.
-_Harvester = Callable[[Dict[str, Any], str], None]
+# A profile = the harvester for a source type: it takes (frontmatter, body, source path)
+# and returns the NoteRelations it found; the path lets a profile find its project (the
+# Quarto profile reads its site URL there).
+_Harvester = Callable[[Dict[str, Any], str, Optional[str]], NoteRelations]
 
 
-def _quarto_harvest(fm: Dict[str, Any], body: str) -> NoteRelations:
-    """The Quarto blog-post profile: categories + series + cross-post + aliases."""
+def _quarto_harvest(fm: Dict[str, Any], body: str, source_path: Optional[str] = None) -> NoteRelations:
+    """The Quarto blog-post profile: categories + series + cross-post + aliases.
+
+    Series and cross-post links count only when they point into the post's own site,
+    whose URL the post's Quarto project names (`quarto_site_url`, ruling 260119bf)."""
+    site_url = quarto_site_url(source_path)
     return NoteRelations(
         categories=harvest_categories(fm),
-        series_refs=harvest_series_links(body),
+        series_refs=harvest_series_links(body, site_url),
         aliases=harvest_aliases(fm),
-        cross_post_refs=harvest_cross_post_links(body),
+        cross_post_refs=harvest_cross_post_links(body, site_url),
     )
 
 
-def _memory_harvest(fm: Dict[str, Any], body: str) -> NoteRelations:
+def _memory_harvest(fm: Dict[str, Any], body: str, source_path: Optional[str] = None) -> NoteRelations:
     """The memory profile: relationships ride `[[wiki-links]]` (parse), nothing here."""
     return NoteRelations()
 
 
 # Source-type profiles. Add a new format (e.g. "scratchpad") as a new entry.
-PROFILES: Dict[str, Callable[[Dict[str, Any], str], NoteRelations]] = {
+PROFILES: Dict[str, _Harvester] = {
     "quarto_post": _quarto_harvest,
     "memory": _memory_harvest,
 }
@@ -202,14 +265,17 @@ def detect_profile(
 
 
 def harvest_relations(
-    parsed: ParsedMarkdown,        # The parsed document
-    profile: Optional[str] = None,  # Explicit profile key, or None to auto-detect
+    parsed: ParsedMarkdown,           # The parsed document
+    profile: Optional[str] = None,    # Explicit profile key, or None to auto-detect
+    source_path: Optional[str] = None,  # The document's file path (a profile may find its project from it)
 ) -> NoteRelations:  # The harvested relationships
     """Harvest a note's relationships using its (detected or given) source profile.
 
     `profile=None` auto-detects from the frontmatter; pass an explicit profile to
     override (e.g. force `quarto_post` for a corpus the detector can't sniff). An
-    unknown profile key falls back to `memory` (wiki-links only)."""
+    unknown profile key falls back to `memory` (wiki-links only). `source_path` is
+    handed to the profile: the Quarto profile reads its site URL from the post's
+    project, so site links are told from other sites' links."""
     name = profile or detect_profile(parsed.frontmatter)
     harvest = PROFILES.get(name, _memory_harvest)
-    return harvest(parsed.frontmatter, parsed.body)
+    return harvest(parsed.frontmatter, parsed.body, source_path)
