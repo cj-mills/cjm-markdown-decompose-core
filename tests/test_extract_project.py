@@ -1,8 +1,10 @@
 """Extract markdown -> NoteNode and project notes -> MEMORY.md index (with idempotency)."""
 
+import pytest
+
 from cjm_dev_graph_schema.identity import note_node_id
 from cjm_dev_graph_schema.nodes import NoteNode
-from cjm_markdown_decompose_core.extract import note_from_text
+from cjm_markdown_decompose_core.extract import corpus_index_files, note_from_text
 from cjm_markdown_decompose_core.project import (
     first_sentence, note_index_line, render_memory_index, render_onboarding_surface,
 )
@@ -63,6 +65,24 @@ def test_index_md_identified_by_directory_permalink():
 def test_root_level_index_falls_back_to_dir_name():
     note = note_from_text("/corpus/posts/index.md", NO_NAME_DOC, corpus_root="/corpus/posts")
     assert note.slug == "posts"  # relative-to-root "." guarded to the dir name
+
+
+def test_corpus_index_files_reads_md_and_qmd_and_refuses_both(tmp_path):
+    # Quarto renders `index.qmd` like `index.md`: both are post files and identity is
+    # the directory either way (finding 87b88ea3); a directory holding both is refused.
+    for slug, name in [("a-post", "index.md"), ("series/b-post", "index.qmd")]:
+        (tmp_path / slug).mkdir(parents=True)
+        (tmp_path / slug / name).write_text(NO_NAME_DOC)
+    (tmp_path / "a-post" / "cover.md").write_text(NO_NAME_DOC)  # not an index file
+    files = corpus_index_files(str(tmp_path))
+    assert [p.relative_to(tmp_path).as_posix() for p in files] == [
+        "a-post/index.md", "series/b-post/index.qmd"]
+    qmd = note_from_text(str(files[1]), NO_NAME_DOC, corpus_root=str(tmp_path))
+    assert qmd.slug == "series/b-post"
+
+    (tmp_path / "a-post" / "index.qmd").write_text(NO_NAME_DOC)
+    with pytest.raises(ValueError, match="a-post"):
+        corpus_index_files(str(tmp_path))
 
 
 def test_non_index_and_frontmatter_name_unaffected_by_index_rule():

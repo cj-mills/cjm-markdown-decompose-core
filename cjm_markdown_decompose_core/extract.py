@@ -9,7 +9,7 @@ markdown corpus meets the dev schema.
 
 import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from cjm_context_graph_primitives.provenance import SourceRef
 from cjm_dev_graph_schema.nodes import NoteNode
@@ -50,7 +50,7 @@ def slug_from(
     why an explicit frontmatter `name` is preferred for content that outlives its
     location.
 
-    SSG convention (Quarto/Hugo/…): a `<dir>/index.md` file is identified by its
+    SSG convention (Quarto/Hugo/…): a `<dir>/index.md` (or `index.qmd`) file is identified by its
     DIRECTORY — the permalink — not the literal `index` stem. Otherwise every
     post in a `posts/<slug>/index.md` tree collapses onto one `index` slug (the
     corpus-findings identity collision). The post's stable identity is its
@@ -59,7 +59,7 @@ def slug_from(
     if isinstance(name, str) and name.strip():
         return name.strip()
     p = Path(path)
-    # `<dir>/index.md` → identify by the directory (permalink); else drop the suffix.
+    # `<dir>/index.md` / `index.qmd` → identify by the directory (permalink); else drop the suffix.
     ident = p.parent if p.stem.lower() == "index" else p.with_suffix("")
     if corpus_root:
         try:
@@ -183,3 +183,29 @@ def note_from_file(
     return note_from_parsed(path, SourceRef.compute_hash(raw),
                             parse_markdown(raw.decode("utf-8")), corpus_root, profile, with_sections, lossless,
                             slug=slug)
+
+
+# The SSG permalink files a post directory may hold: Quarto renders an `index.qmd`
+# exactly like an `index.md` (the `.qmd` adds executable cells, e.g. Graphviz `{dot}`).
+INDEX_FILENAMES = ("index.md", "index.qmd")
+
+
+def corpus_index_files(
+    corpus_root: str,  # Root of an SSG post corpus (e.g. christianjmills/posts)
+) -> List[Path]:  # Every post's index file, sorted by path
+    """Every `<dir>/index.md` or `<dir>/index.qmd` under the root, one per post directory.
+
+    The file set a post corpus ingest decomposes: each becomes a Note identified by its
+    directory (`slug_from`), whatever its extension. A directory holding BOTH is refused:
+    the two would claim one permalink identity and render to the same `index.html`, so
+    which file is the post is the author's call, never a guess."""
+    root = Path(corpus_root)
+    files = sorted(p for name in INDEX_FILENAMES for p in root.rglob(name))
+    by_dir: Dict[Path, List[Path]] = {}
+    for p in files:
+        by_dir.setdefault(p.parent, []).append(p)
+    both = [str(d) for d, fs in by_dir.items() if len(fs) > 1]
+    if both:
+        raise ValueError("post directories holding more than one index file "
+                         f"({', '.join(INDEX_FILENAMES)}): " + ", ".join(both))
+    return files
