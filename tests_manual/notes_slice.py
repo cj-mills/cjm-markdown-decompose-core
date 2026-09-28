@@ -6,7 +6,7 @@ from cjm_markdown_decompose_core.extract import note_from_file
 from cjm_markdown_decompose_core.ingest import corpus_graph_elements
 from cjm_dev_graph_schema.identity import series_node_id, topic_node_id
 
-ROOT = "/mnt/990_PRO_4TB/Projects/GitHub/cj-mills/christianjmills/posts"
+ROOT = "/mnt/SN850X_8TB_EXT4/Projects/GitHub/cj-mills/christianjmills/posts"
 SLICE = ["pytorch-train-object-detector-yolox-tutorial", "tfjs-yolox-unity-tutorial",
          "the-learning-game-book-notes", "dumbing-us-down-book-notes",
          "weapons-of-mass-instruction-book-notes"]
