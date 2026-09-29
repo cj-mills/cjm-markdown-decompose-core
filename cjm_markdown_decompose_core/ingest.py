@@ -19,26 +19,26 @@ def corpus_graph_elements(
     """Collect notes into the node + edge wire-dict lists `extend_graph` expects.
 
     One `Note` node per file plus its relationship edges — `REFERENCES`
-    (`[[wiki-links]]` + cross-post links) and `TAGGED` (categories) — and, when the note
+    (`[[wiki-links]]`) and `TAGGED` (categories) — and, when the note
     was decomposed `with_sections`, its `Section` nodes + `HAS_SECTION`/`PART_OF` edges
     (the body content + hierarchy). The shared `Topic` facet per category is emitted ONCE,
     deduped across the corpus, so independent notes sharing a category converge on one
     node. No Series and no `IN_SERIES`: a Series is born by a journaled op and its
-    membership is journaled intent (DEC 72d669c5); a note's series-page links ride its
-    `site_refs` for the post-replay resolve pass. Deterministic ids make the result idempotent under
+    membership is journaled intent (DEC 72d669c5); a note's in-body site links (posts,
+    series pages, any page) ride its `site_refs` for the post-replay resolve pass, the one
+    resolver (ruling d31e9ba7). Deterministic ids make the result idempotent under
     `extend_graph` — re-ingesting collides into verified no-ops rather than
     duplicating.
 
     A confirmed `aliases` map resolves drifted link slugs to their canonical note
-    before the edge is built, so a once-dangling `[[wiki-link]]` (or cross-post
-    link) lands on the real note (slug-drift rot healed on-graph, file untouched)."""
+    before the edge is built, so a once-dangling `[[wiki-link]]` lands on the real
+    note (slug-drift rot healed on-graph, file untouched)."""
     nodes: List[Dict[str, Any]] = []
     edges: List[Dict[str, Any]] = []
     topics: Dict[str, None] = {}   # distinct category keys (first-seen order)
     for n in notes:
         nodes.append(n.to_graph_node())
         edges.extend(n.reference_edges(aliases))
-        edges.extend(n.cross_post_edges(aliases))
         edges.extend(n.tagged_edges())
         for sec in n.sections:
             nodes.append(sec.to_graph_node())

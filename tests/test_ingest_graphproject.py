@@ -87,7 +87,9 @@ def test_topics_are_deduped_and_no_series_is_minted():
     assert labels.count(DevNodeKinds.TOPIC) == 2
     assert labels.count(DevNodeKinds.SERIES) == 0
     notes = [n for n in nodes if n["label"] == DevNodeKinds.NOTE]
-    assert all(n["properties"]["site_refs"] == ["/series/notes/education-notes.html"] for n in notes)
+    # every in-body site link rides site_refs (ruling d31e9ba7): the series page and any post link
+    assert all(n["properties"]["site_refs"][0] == "/series/notes/education-notes.html" for n in notes)
+    assert any(any("dumbing-us-down-book-notes" in t for t in n["properties"]["site_refs"]) for n in notes)
     topic_ids = {n["id"] for n in nodes if n["label"] == DevNodeKinds.TOPIC}
     assert topic_ids == {topic_node_id("education"), topic_node_id("history")}
 
@@ -99,10 +101,10 @@ def test_both_books_converge_on_shared_facets():
     # Both books TAGGED education+history (4 edges); an in-body series link is never
     # membership (ruling 0f9ee9a8 (2)), so ingest emits no IN_SERIES at all.
     assert len(tagged) == 4 and in_series == []
-    # The cross-post link (learning-game -> dumbing-us-down) is a REFERENCES edge.
+    # The post link (learning-game -> dumbing-us-down) is no ingest edge: it rides the
+    # note's site_refs for the one post-replay resolver (ruling d31e9ba7).
     refs = [e for e in edges if e["relation_type"] == DevRelations.REFERENCES]
-    assert any(e["target_id"] == note_node_id("dumbing-us-down-book-notes")
-               and e["properties"].get("cross_post") for e in refs)
+    assert not any(e["target_id"] == note_node_id("dumbing-us-down-book-notes") for e in refs)
 
 
 def test_note_view_from_graph_node_dict():

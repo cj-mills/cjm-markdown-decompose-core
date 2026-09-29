@@ -3,9 +3,8 @@
 from cjm_markdown_decompose_core.extract import note_from_text
 from cjm_markdown_decompose_core.parse import parse_markdown
 from cjm_markdown_decompose_core.relations import (
-    detect_profile, harvest_aliases, harvest_categories, harvest_cross_post_links,
-    harvest_relations, harvest_series_links, is_site_link, normalize_permalink,
-    quarto_site_url, slugify)
+    detect_profile, harvest_aliases, harvest_categories, harvest_relations, harvest_site_links,
+    is_page_target, is_site_link, normalize_permalink, quarto_site_url, slugify)
 
 # A representative Quarto blog post (shape from christianjmills/posts).
 QUARTO_POST = """---
@@ -64,26 +63,32 @@ def test_harvest_aliases_to_permalinks():
     assert harvest_aliases(fm) == ["icevision-openvino-unity-tutorial/part-1"]
 
 
-def test_harvest_cross_post_links_with_anchors_and_code_stripped():
+def test_harvest_site_links_keeps_every_page_target_verbatim():
+    # ONE harvest for every in-body site link (ruling d31e9ba7): posts, series pages, relative
+    # and anchored targets, kept VERBATIM for the post-replay resolver; code is stripped, and
+    # the self-link is kept here (the resolver drops a link to the note's own page).
     body = parse_markdown(QUARTO_POST).body
-    refs = harvest_cross_post_links(body)
-    assert ("google-colab-getting-started-tutorial", "using-hardware-acceleration") in refs
-    assert ("mamba-getting-started-tutorial-windows", "") in refs
-    # The self-link is still harvested here (extract filters it); the CODE link is NOT.
-    assert ("pytorch-train-object-detector-yolox-tutorial", "loading-the-model") in refs
-    assert all(p != "should-be-ignored" for p, _ in refs)
-
-
-def test_harvest_series_links_keeps_the_verbatim_target():
-    # A series-page link is a cross-reference kept VERBATIM for the post-replay resolve pass
-    # (DEC 72d669c5): what the page is lives in site_path facts, never in the link's shape.
-    body = parse_markdown(QUARTO_POST).body
-    assert harvest_series_links(body) == ["/series/notes/education-notes.html"]
+    assert harvest_site_links(body) == [
+        "/posts/google-colab-getting-started-tutorial/#using-hardware-acceleration",
+        "../mamba-getting-started-tutorial-windows/",
+        "/posts/pytorch-train-object-detector-yolox-tutorial/#loading-the-model",
+        "/series/notes/education-notes.html"]
     twice = "[a](/series/notes/x.html) [b](/series/notes/x.html) [c](/series/notes/x.html#part)"
-    assert harvest_series_links(twice) == ["/series/notes/x.html", "/series/notes/x.html#part"]
+    assert harvest_site_links(twice) == ["/series/notes/x.html", "/series/notes/x.html#part"]
 
 
-def test_only_site_links_harvest_series_and_cross_posts():
+def test_only_page_targets_are_site_links():
+    # an image, a video or a download beside a post is a file, never a cross-reference; a bare
+    # #anchor names a place on the linking page itself
+    for page in ("../x/", "/posts/x", "part-2/index.html", "/series/notes/x.htm#a", "../../y/z/#b"):
+        assert is_page_target(page), page
+    for other in ("./images/a.png", "../b/c.MP4", "#anchor", "/files/x.zip", ""):
+        assert not is_page_target(other), other
+    body = "![img](./images/a.png) [same page](#here) [prev](../part-1/) [vid](./v.mp4)"
+    assert harvest_site_links(body) == ["../part-1/"]
+
+
+def test_only_site_links_are_harvested():
     # Another site's /series/ or /posts/ path is not a site relation (finding 0fadbbbd); the
     # site's own absolute URL is (www. included), and relative/rooted links always are.
     body = ("[hnsw](https://www.pinecone.io/learn/series/faiss/hnsw/) "
@@ -92,12 +97,11 @@ def test_only_site_links_harvest_series_and_cross_posts():
             "[own series](https://christianjmills.com/series/notes/education-notes.html) "
             "[rooted](/posts/y/) [mail](mailto:me@example.com)")
     site = "https://christianjmills.com"
-    assert harvest_series_links(body, site) == [
-        "https://christianjmills.com/series/notes/education-notes.html"]
-    assert harvest_cross_post_links(body, site) == [("x", "a"), ("y", "")]
+    assert harvest_site_links(body, site) == [
+        "https://www.christianjmills.com/posts/x/#a",
+        "https://christianjmills.com/series/notes/education-notes.html", "/posts/y/"]
     # With no known site URL every absolute URL is external; rooted links still count.
-    assert harvest_series_links(body) == []
-    assert harvest_cross_post_links(body) == [("y", "")]
+    assert harvest_site_links(body) == ["/posts/y/"]
     assert is_site_link("../z/") and is_site_link("#anchor")
     assert not is_site_link("https://christianjmills.com/posts/x/")
 
@@ -131,27 +135,25 @@ def test_detect_profile():
 
 def test_harvest_relations_dispatches_by_profile():
     rel = harvest_relations(parse_markdown(QUARTO_POST))
-    assert rel.categories and rel.site_refs and rel.aliases and rel.cross_post_refs
+    assert rel.categories and rel.site_refs and rel.aliases
     mem = harvest_relations(parse_markdown(MEMORY_DOC))
     assert mem == type(mem)()  # memory profile harvests nothing extra (wiki-links via parse)
 
 
-def test_extract_drops_self_reference_cross_post_link():
+def test_extract_keeps_every_site_link_for_the_resolver():
     note = note_from_text(
         "/corpus/posts/pytorch-train-object-detector-yolox-tutorial/index.md",
         QUARTO_POST, corpus_root="/corpus/posts")
     assert note.slug == "pytorch-train-object-detector-yolox-tutorial"
-    targets = {p for p, _ in note.cross_post_refs}
-    # own-section self-link dropped; real cross-post links kept
-    assert "pytorch-train-object-detector-yolox-tutorial" not in targets
-    assert "google-colab-getting-started-tutorial" in targets
     assert note.categories == ["pytorch", "object-detection", "yolox", "tutorial"]
-    assert note.site_refs == ["/series/notes/education-notes.html"]
+    # the self-link rides along: the resolver drops a link to the note's own page
+    assert note.site_refs[-1] == "/series/notes/education-notes.html" and len(note.site_refs) == 4
+    assert not hasattr(note, "cross_post_refs")
 
 
 def test_memory_corpus_unaffected():
     note = note_from_text("memory/some.md", MEMORY_DOC)
-    assert note.categories == [] and note.site_refs == [] and note.cross_post_refs == []
+    assert note.categories == [] and note.site_refs == []
     assert note.references == ["other-memory"]  # wiki-links still work
 
 

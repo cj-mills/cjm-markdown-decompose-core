@@ -21,7 +21,7 @@ print("NODES:", dict(nl)); print("EDGES:", dict(el))
 
 print("\n-- per note --")
 for n in notes:
-    print(f"  {n.slug:<46} cats={n.categories} series={n.series_refs} xpost={len(n.cross_post_refs)}")
+    print(f"  {n.slug:<46} cats={n.categories} site_refs={len(n.site_refs)}")
 
 # The cluster test: who TAGGED 'education' and who is IN the education-notes series?
 edu_topic = topic_node_id("education")

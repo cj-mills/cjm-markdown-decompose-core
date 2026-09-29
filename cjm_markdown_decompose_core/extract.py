@@ -14,8 +14,9 @@ from typing import Any, Dict, List, Optional
 from cjm_context_graph_primitives.provenance import SourceRef
 from cjm_dev_graph_schema.nodes import NoteNode
 
+from .blocks import derived_blocks
 from .parse import parse_markdown, ParsedMarkdown
-from .relations import harvest_relations
+from .relations import detect_profile, harvest_relations
 from .sections import decompose_sections
 
 
@@ -114,9 +115,9 @@ def note_from_parsed(
 
     Beyond the coarse identity/metadata, the per-source-type relationship
     harvesters (`relations`) add the corpus's real relationship signals —
-    categories, series-page links, cross-post links, aliases — selected by the
-    detected (or given) source profile. A cross-post link to THIS post's own
-    section is dropped (a self-reference is not a cross-post edge).
+    categories, every in-body site link (kept verbatim for the post-replay resolver,
+    which drops a link to the note's own page; ruling d31e9ba7), aliases — selected by
+    the detected (or given) source profile.
 
     Body content comes on-graph in one of two opt-in modes. `with_sections`
     (Scope A, the notes corpus) decomposes the body into navigable `Section` nodes
@@ -124,13 +125,16 @@ def note_from_parsed(
     stronger form: it sections too, but each section carries its heading-inclusive
     verbatim `raw` span and the Note carries the verbatim `frontmatter_raw`, so the
     file reconstructs byte-for-byte (`frontmatter_raw + ''.join(s.raw in order)`).
-    Both are off for plain coarse ingestion."""
+    Both are off for plain coarse ingestion.
+
+    The body's DERIVED blocks (`blocks`, design 253ac996) are classified once under the
+    note's profile and handed to both the harvest (which skips them) and the sectioning
+    (which types them), so the two can never disagree on what is content."""
     fm = parsed.frontmatter
     slug = slug or slug_from(path, fm, corpus_root)
     description = fm.get("description")
-    rel = harvest_relations(parsed, profile, path)
-    own = {slug, Path(path).parent.name}  # this post's own permalink (both namespaces)
-    cross = [(p, a) for (p, a) in rel.cross_post_refs if p not in own]
+    blocks = derived_blocks(parsed.body, profile or detect_profile(fm))
+    rel = harvest_relations(parsed, profile, path, blocks=blocks)
     note = NoteNode(
         slug=slug,
         title=title_from(slug, fm),
@@ -144,11 +148,11 @@ def note_from_parsed(
         categories=rel.categories,
         site_refs=rel.site_refs,
         aliases=rel.aliases,
-        cross_post_refs=cross,
         frontmatter_raw=parsed.frontmatter_raw if lossless else "",
     )
     if with_sections or lossless:
-        note.sections = decompose_sections(parsed.body, note.id, path, lossless=lossless)
+        note.sections = decompose_sections(parsed.body, note.id, path, lossless=lossless,
+                                           blocks=blocks)
     return note
 
 

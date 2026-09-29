@@ -14,14 +14,16 @@ profile rather than a rewrite. `extract` binds the harvested `NoteRelations` ont
 the `NoteNode` fields; this module returns plain data and carries no graph schema.
 """
 
+import posixpath
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import urlsplit
 
 import yaml
 
+from .blocks import derived_blocks, DerivedBlock, mask_blocks
 from .parse import ParsedMarkdown, strip_code
 
 # A markdown inline-link target: the `(...)` of `[text](url)`, up to whitespace
@@ -29,8 +31,6 @@ from .parse import ParsedMarkdown, strip_code
 _MD_LINK_RE = re.compile(r"\]\(\s*<?([^)>\s]+)>?")
 # `/posts/<permalink>` segment in a link target (absolute, relative, or full URL).
 _POSTS_RE = re.compile(r"(?:^|/)posts/(.+)$")
-# `/series/<...>/<key>` segment in a link target.
-_SERIES_RE = re.compile(r"(?:^|/)series/(.+)$")
 
 
 def slugify(
@@ -158,47 +158,36 @@ def harvest_aliases(
     return list(seen)
 
 
-def harvest_cross_post_links(
+def is_page_target(
+    target: str,  # A site link target (rooted, relative, or an own-site URL)
+) -> bool:  # True when it names a PAGE (a directory, an .html page, or an extension-less path)
+    """A link to a page, not to a file: an image, video or download beside a post is never a
+    cross-reference. A bare `#anchor` names a place on the linking page itself, so it is none."""
+    path = urlsplit(target).path
+    if not path:
+        return False
+    ext = posixpath.splitext(path.rstrip("/"))[1].lower()
+    return path.endswith("/") or ext in ("", ".html", ".htm")
+
+
+def harvest_site_links(
     body: str,                       # Document body
     site_url: Optional[str] = None,  # The site's own URL (quarto_site_url); None = every absolute URL is external
-) -> List[Tuple[str, str]]:  # (permalink, anchor) pairs, de-duplicated, order-preserved
-    """Harvest `/posts/...` markdown links -> (permalink, section anchor) pairs.
+) -> List[str]:  # Verbatim link targets, anchors kept (de-duplicated, order-preserved)
+    """Harvest every in-body link to a site PAGE -> its VERBATIM target (ruling d31e9ba7).
 
-    Code spans are stripped first (so URLs in example blocks are not mistaken for
-    references — the same guard the wiki-link extractor uses). Only site links count
-    (`is_site_link`): another site's `/posts/` path is not a cross-post reference. The
-    anchor is kept (resolved to a section node later); de-duplication is on
-    (permalink, anchor)."""
-    seen: Dict[Tuple[str, str], None] = {}
-    for m in _MD_LINK_RE.finditer(strip_code(body)):
-        target = m.group(1)
-        if not is_site_link(target, site_url):
-            continue
-        permalink = normalize_permalink(target)
-        if not permalink:
-            continue
-        anchor = target.split("#", 1)[1] if "#" in target else ""
-        seen.setdefault((permalink, anchor), None)
-    return list(seen)
-
-
-def harvest_series_links(
-    body: str,                       # Document body
-    site_url: Optional[str] = None,  # The site's own URL (quarto_site_url); None = every absolute URL is external
-) -> List[str]:  # Verbatim link targets (de-duplicated, order-preserved)
-    """Harvest `/series/...` markdown links -> their VERBATIM targets (a page reference).
-
-    A link to a series page is a CROSS-REFERENCE, never membership (ruling 0f9ee9a8 (2)):
-    membership is journaled intent on the Series. What the page IS (a series, or a topic
-    listing) is not knowable here — it lives in site_path facts the journal replays after
-    ingest — so the target is kept verbatim and the post-replay resolve pass maps it
-    (DEC 72d669c5). The targets survive the callout flattening that drops the `:::`-fence
-    structure (recovered here from the raw body). Only site links count (`is_site_link`):
-    an external URL with a `/series/` segment is another site's page (finding 0fadbbbd)."""
+    ONE harvest for every site link — a post (`/posts/x/`, `../x/`, `../../y/z/#anchor`), a
+    series or topic page, a site page — kept verbatim: what the target IS lives in the
+    `site_path` facts the journal replays after ingest, and a relative target resolves only
+    against the linking page's own path, so the post-replay resolve pass maps it (DEC
+    72d669c5) and reports what it cannot place. A link to a series page is a
+    CROSS-REFERENCE, never membership (ruling 0f9ee9a8 (2)). Code spans are stripped first;
+    only site links count (`is_site_link`: another site's `/series/` or `/posts/` path is not
+    one, finding 0fadbbbd), and only page targets (`is_page_target`)."""
     seen: Dict[str, None] = {}
     for m in _MD_LINK_RE.finditer(strip_code(body)):
         target = m.group(1)
-        if is_site_link(target, site_url) and _SERIES_RE.search(target):
+        if is_site_link(target, site_url) and is_page_target(target):
             seen.setdefault(target, None)
     return list(seen)
 
@@ -207,9 +196,8 @@ def harvest_series_links(
 class NoteRelations:
     """The harvested relationship signals for one note (beyond `[[wiki-links]]`)."""
     categories: List[str] = field(default_factory=list)       # Normalized Topic keys
-    site_refs: List[str] = field(default_factory=list)        # Verbatim site-link targets the resolve pass maps (series pages today)
+    site_refs: List[str] = field(default_factory=list)        # Verbatim site-link targets the resolve pass maps (every page link into the site)
     aliases: List[str] = field(default_factory=list)          # Alternate-identity permalinks
-    cross_post_refs: List[Tuple[str, str]] = field(default_factory=list)  # (permalink, anchor) cross-post links
 
 
 # A profile = the harvester for a source type: it takes (frontmatter, body, source path)
@@ -219,16 +207,16 @@ _Harvester = Callable[[Dict[str, Any], str, Optional[str]], NoteRelations]
 
 
 def _quarto_harvest(fm: Dict[str, Any], body: str, source_path: Optional[str] = None) -> NoteRelations:
-    """The Quarto blog-post profile: categories + series-page links + cross-post + aliases.
+    """The Quarto blog-post profile: categories + site links + aliases.
 
-    Series-page and cross-post links count only when they point into the post's own site,
-    whose URL the post's Quarto project names (`quarto_site_url`, ruling 260119bf)."""
+    Site links count only when they point into the post's own site, whose URL the post's
+    Quarto project names (`quarto_site_url`, ruling 260119bf); every one of them, a post, a
+    series page or any other page, is kept verbatim for the one resolver (ruling d31e9ba7)."""
     site_url = quarto_site_url(source_path)
     return NoteRelations(
         categories=harvest_categories(fm),
-        site_refs=harvest_series_links(body, site_url),
+        site_refs=harvest_site_links(body, site_url),
         aliases=harvest_aliases(fm),
-        cross_post_refs=harvest_cross_post_links(body, site_url),
     )
 
 
@@ -262,6 +250,7 @@ def harvest_relations(
     parsed: ParsedMarkdown,           # The parsed document
     profile: Optional[str] = None,    # Explicit profile key, or None to auto-detect
     source_path: Optional[str] = None,  # The document's file path (a profile may find its project from it)
+    blocks: Optional[List[DerivedBlock]] = None,  # The body's derived blocks when the caller already classified them (None = classify here)
 ) -> NoteRelations:  # The harvested relationships
     """Harvest a note's relationships using its (detected or given) source profile.
 
@@ -269,7 +258,13 @@ def harvest_relations(
     override (e.g. force `quarto_post` for a corpus the detector can't sniff). An
     unknown profile key falls back to `memory` (wiki-links only). `source_path` is
     handed to the profile: the Quarto profile reads its site URL from the post's
-    project, so site links are told from other sites' links."""
+    project, so site links are told from other sites' links.
+
+    The harvest reads the body with its DERIVED blocks blanked (`blocks.mask_blocks`,
+    design 253ac996 (4)): a series callout's link restates the journaled membership, so
+    a block is never a source of edges."""
     name = profile or detect_profile(parsed.frontmatter)
     harvest = PROFILES.get(name, _memory_harvest)
-    return harvest(parsed.frontmatter, parsed.body, source_path)
+    if blocks is None:
+        blocks = derived_blocks(parsed.body, name)
+    return harvest(parsed.frontmatter, mask_blocks(parsed.body, blocks), source_path)

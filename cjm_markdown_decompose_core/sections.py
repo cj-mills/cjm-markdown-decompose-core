@@ -19,11 +19,12 @@ derived structure" principle), so the Scope-A posts path is untouched.
 """
 
 import re
-from typing import List
+from typing import List, Sequence
 
 from cjm_context_graph_primitives.provenance import SourceRef
 from cjm_dev_graph_schema.nodes import SectionNode
 
+from .blocks import DerivedBlock
 from .parse import find_headings
 
 
@@ -54,12 +55,18 @@ def heading_anchor(
 # if a corpus ever collides, the round-trip harness's byte-exact check is the alarm.
 PREAMBLE_ANCHOR = "_preamble"
 
+# The separator of a CONTINUATION section's anchor, `<region anchor>~<n>`: content that
+# resumes a region a derived block interrupted (design 253ac996). `heading_anchor` strips
+# `~`, so no heading can collide with it.
+CONTINUATION_SEP = "~"
+
 
 def decompose_sections(
     body: str,            # The document body (frontmatter already stripped)
     note_id: str,         # The enclosing Note node id
     path: str = "",       # Source file path (provenance locator)
     lossless: bool = False,  # Lossless mode (memory): also store each section's heading-inclusive verbatim `raw` span + a level-0 preamble region, so concatenating every `raw` in order reproduces the body byte-for-byte
+    blocks: Sequence[DerivedBlock] = (),  # The body's DERIVED blocks (`blocks.derived_blocks`): each becomes its own typed section, and a heading inside one opens nothing
 ) -> List[SectionNode]:  # Ordered Section nodes (document order; preamble first in lossless mode)
     """Decompose a body into ordered `SectionNode`s (heading-delimited).
 
@@ -80,36 +87,64 @@ def decompose_sections(
     gate). The `raw`-span slicing is exact regardless of whether a matched `#` is a
     "real" heading, so round-trip never depends on the heading heuristic being
     perfect. Headings come from `parse.find_headings`, which SKIPS fenced code: a
-    `# comment` inside a ```python block never opens a section (finding c1b976d0)."""
-    matches = find_headings(body)
+    `# comment` inside a ```python block never opens a section (finding c1b976d0).
+
+    DERIVED BLOCKS (design 253ac996): each block in `blocks` is cut out as its own
+    level-0 section — anchor `_<role>` (`-1/-2` on a repeat), `block_role` set, parent the
+    enclosing heading's section — and a heading inside it opens nothing (the series
+    callout's `##` title). The first content after a block in the pre-heading region is
+    the preamble; content RESUMING a region the block interrupted is a continuation
+    section `<region anchor>~<n>` (level 0, parent the region's heading), so the `raw`
+    spans still concatenate to the body byte-for-byte. A body with no blocks decomposes
+    exactly as before."""
+    spans = [(b.start, b.end) for b in blocks]
+    matches = [m for m in find_headings(body) if not any(s <= m.start() < e for s, e in spans)]
+    heads = {m.start(): m for m in matches}
+    starts = {b.start: b for b in blocks}
+    cuts = sorted({0, len(body)} | set(heads) | {p for s in spans for p in s})
     sections: List[SectionNode] = []
-    base_order = 0            # headed sections start here (bumped to 1 when a preamble is emitted)
-    if lossless:
-        preamble_text = body[:matches[0].start()] if matches else body
-        if preamble_text:    # an empty preamble (body starts with a heading) needs no node
-            sections.append(SectionNode(
-                note_id=note_id, anchor=PREAMBLE_ANCHOR, level=0, title="",
-                text=preamble_text, raw=preamble_text, order=0, parent_anchor=None,
-                path=path, content_hash=SourceRef.compute_hash(preamble_text.encode("utf-8"))))
-            base_order = 1
     seen = {}                 # base anchor -> occurrence count (for -1/-2 disambiguation)
+    roles_seen = {}           # block role -> occurrence count
     stack: List = []          # (level, anchor) of open ancestors, for parent resolution
-    for i, m in enumerate(matches):
-        level = len(m.group(1))
-        title = m.group(2).strip()
-        base = heading_anchor(title)
-        n = seen.get(base, 0)
-        seen[base] = n + 1
-        anchor = base if n == 0 else f"{base}-{n}"
-        end = matches[i + 1].start() if i + 1 < len(matches) else len(body)
-        text = body[m.end():end]
-        raw = body[m.start():end] if lossless else ""
-        while stack and stack[-1][0] >= level:
-            stack.pop()
-        parent_anchor = stack[-1][1] if stack else None
-        stack.append((level, anchor))
+    region = None             # the current region's head anchor (None before any content)
+    resumed = 0               # continuation count within the region
+
+    def emit(anchor, level, title, text, span, parent, role=""):
+        raw = span if lossless else ""
         sections.append(SectionNode(
             note_id=note_id, anchor=anchor, level=level, title=title, text=text,
-            order=base_order + i, parent_anchor=parent_anchor, path=path, raw=raw,
+            order=len(sections), parent_anchor=parent, path=path, raw=raw, block_role=role,
             content_hash=SourceRef.compute_hash((raw or text).encode("utf-8"))))
+
+    for a, z in zip(cuts, cuts[1:]):
+        if a == z:
+            continue
+        span = body[a:z]
+        enclosing = stack[-1][1] if stack else None
+        if a in starts:
+            role = starts[a].role
+            n = roles_seen.get(role, 0)
+            roles_seen[role] = n + 1
+            emit(f"_{role}" if n == 0 else f"_{role}-{n}", 0, "", span, span, enclosing, role)
+        elif a in heads:
+            m = heads[a]
+            level = len(m.group(1))
+            title = m.group(2).strip()
+            base = heading_anchor(title)
+            n = seen.get(base, 0)
+            seen[base] = n + 1
+            anchor = base if n == 0 else f"{base}-{n}"
+            while stack and stack[-1][0] >= level:
+                stack.pop()
+            parent_anchor = stack[-1][1] if stack else None
+            stack.append((level, anchor))
+            emit(anchor, level, title, body[m.end():z], span, parent_anchor)
+            region, resumed = anchor, 0
+        elif region is None:  # the pre-heading region's first content: the preamble
+            if lossless:
+                emit(PREAMBLE_ANCHOR, 0, "", span, span, None)
+            region, resumed = PREAMBLE_ANCHOR, 0
+        elif region != PREAMBLE_ANCHOR or lossless:  # content resuming a region a block interrupted
+            resumed += 1
+            emit(f"{region}{CONTINUATION_SEP}{resumed}", 0, "", span, span, enclosing)
     return sections
