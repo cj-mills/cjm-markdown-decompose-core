@@ -1,8 +1,8 @@
 """Derived blocks (design 253ac996): classification, typed sections, harvest masking."""
 
 from cjm_markdown_decompose_core.blocks import (
-    HAND_TOC, SERIES_CALLOUT, SERIES_NAV_LINE, block_link_targets, derived_blocks,
-    mask_blocks, quarto_derived_blocks)
+    CHROME_INCLUDE, HAND_TOC, SERIES_CALLOUT, SERIES_NAV_LINE, block_link_targets,
+    derived_blocks, include_target, mask_blocks, quarto_derived_blocks)
 from cjm_markdown_decompose_core.extract import note_from_text
 from cjm_markdown_decompose_core.sections import CONTINUATION_SEP, PREAMBLE_ANCHOR
 
@@ -33,6 +33,8 @@ Setup steps.
 
 ### Next: [Part 2](../part-2/)
 
+More setup.
+
 {{< include /_about-author-cta.qmd >}}
 """
 
@@ -41,13 +43,23 @@ def _roles(body):
     return [(b.role, body[b.start:b.end]) for b in quarto_derived_blocks(body)]
 
 
-def test_the_three_roles_and_their_spans():
+def test_the_four_roles_and_their_spans():
     roles = _roles(POST)
-    assert [r for r, _ in roles] == [SERIES_CALLOUT, HAND_TOC, SERIES_NAV_LINE]
-    callout, toc, nav = (t for _, t in roles)
+    assert [r for r, _ in roles] == [SERIES_CALLOUT, HAND_TOC, SERIES_NAV_LINE, CHROME_INCLUDE]
+    callout, toc, nav, chrome = (t for _, t in roles)
     assert callout.startswith("\n::: {.callout-tip}") and callout.endswith(":::\n\n")  # leading blank joins the first block
     assert toc.startswith("* [Introduction]") and "-----\n" in toc                      # the closing rule joins the TOC
     assert nav == "### Next: [Part 2](../part-2/)\n\n"
+    assert chrome == "{{< include /_about-author-cta.qmd >}}\n"
+    assert include_target(chrome) == "/_about-author-cta.qmd"
+
+
+def test_only_the_surveyed_chrome_includes_are_derived():
+    body = ("## A\n\n{{< include /_python-multiprocessing-warning.qmd >}}\n\nText.\n\n"
+            "{{< include /_tutorial-cta.qmd >}}\n\n```\n{{< include /_about-author-cta.qmd >}}\n```\n")
+    roles = _roles(body)
+    assert [r for r, _ in roles] == [CHROME_INCLUDE]   # the content include stays content; fenced code is skipped
+    assert include_target(roles[0][1]) == "/_tutorial-cta.qmd"
 
 
 def test_collection_titles_and_bare_links():
@@ -82,7 +94,7 @@ def test_nav_lines_with_several_links():
 
 def test_profiles_without_blocks():
     assert derived_blocks(POST, "memory") == []
-    assert len(derived_blocks(POST, "quarto_post")) == 3
+    assert len(derived_blocks(POST, "quarto_post")) == 4
 
 
 def test_mask_keeps_offsets_and_blanks_links():
@@ -109,6 +121,7 @@ def test_typed_sections_round_trip_and_hierarchy():
         ("setup", "", None),
         ("_series_nav_line", SERIES_NAV_LINE, "setup"),
         (f"setup{CONTINUATION_SEP}1", "", "setup"),  # the content the nav line interrupted
+        ("_chrome_include", CHROME_INCLUDE, "setup"),
     ]
     assert [s.order for s in secs] == list(range(len(secs)))
     node = secs[0].to_graph_node()
@@ -132,5 +145,6 @@ def test_crlf_bodies_classify_and_round_trip():
     text = (FM + POST).replace("\n", "\r\n")
     note = note_from_text("/c/p/index.md", text, profile="quarto_post", lossless=True)
     assert note.frontmatter_raw + "".join(s.raw for s in note.sections) == text
-    assert [s.block_role for s in note.sections if s.block_role] == [SERIES_CALLOUT, HAND_TOC, SERIES_NAV_LINE]
+    assert [s.block_role for s in note.sections if s.block_role] == [SERIES_CALLOUT, HAND_TOC, SERIES_NAV_LINE,
+                                                                     CHROME_INCLUDE]
     assert "-----\r\n" in next(s.raw for s in note.sections if s.block_role == HAND_TOC)

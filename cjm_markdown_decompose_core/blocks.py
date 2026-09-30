@@ -3,7 +3,9 @@
 An archive post carries blocks another part of the site already states (design 253ac996,
 work item 20b56bb7): the in-body series callout (membership is journaled on the Series,
 38f1fd96), the hand-written table of contents (Quarto renders its own) and the hand
-Previous / Next lines (the series order). Each is classified here, BEFORE heading
+Previous / Next lines (the series order), and the site-chrome includes (the author and
+questions callouts, which the post page's author strip replaces — design 39c51c15 (5)).
+Each is classified here, BEFORE heading
 sectioning, so it becomes its own Section carrying a `block_role` and never counts as
 content: the relation harvest skips it (`mask_blocks`), and the site build drops it from
 the render and projects the replacement.
@@ -22,6 +24,13 @@ from .parse import fenced_code_spans
 SERIES_CALLOUT = "series_callout"    # the "part of the following series" callout
 HAND_TOC = "hand_toc"                # the hand-written table of contents
 SERIES_NAV_LINE = "series_nav_line"  # a hand "### Previous: [Part N](...)" / "Next:" line
+CHROME_INCLUDE = "chrome_include"    # an include of site chrome (the author / questions callouts)
+
+# The site-chrome includes (finding 7ca35b0b; design 39c51c15 (5)): surveyed over the whole
+# archive — the about-author callout closes all 210 posts, the questions callout sits in 32.
+# The one content include (the multiprocessing warning, 4 posts) is the post's own content.
+_CHROME_INCLUDES = ("/_about-author-cta.qmd", "/_tutorial-cta.qmd")
+_INCLUDE_LINE_RE = re.compile(r"^\{\{<[ \t]*include[ \t]+(\S+)[ \t]*>\}\}[ \t]*\r?$\n?", re.M)
 
 # Every line-end anchor below allows a `\r`: some archive posts are CRLF files, and ingest
 # decodes the bytes without newline translation (the lossless round trip).
@@ -56,7 +65,7 @@ _URI_ESCAPED = set('<>|"{}[]^`')
 @dataclass(frozen=True)
 class DerivedBlock:
     """One derived block: its role and its `[start, end)` span of the body."""
-    role: str   # SERIES_CALLOUT | HAND_TOC | SERIES_NAV_LINE
+    role: str   # SERIES_CALLOUT | HAND_TOC | SERIES_NAV_LINE | CHROME_INCLUDE
     start: int  # Span start (character offset into the body)
     end: int    # Span end (exclusive), trailing blank lines included
 
@@ -168,17 +177,30 @@ def find_series_nav_lines(
             if not _in_spans(m.start(), skip)]
 
 
+def find_chrome_includes(
+    body: str,                             # Document body
+    taken: Sequence[Tuple[int, int]] = (),  # Spans already classified (skipped)
+) -> List[Tuple[int, int]]:  # [start, end) spans of the site-chrome include lines
+    """Site-chrome include lines: a line holding only `{{< include PATH >}}` whose PATH is one
+    of the surveyed chrome partials. Any other include is the post's content."""
+    skip = list(fenced_code_spans(body)) + list(taken)
+    return [(m.start(), _absorb_blank(body, m.end())) for m in _INCLUDE_LINE_RE.finditer(body)
+            if m.group(1) in _CHROME_INCLUDES and not _in_spans(m.start(), skip)]
+
+
 def quarto_derived_blocks(
     body: str,  # A Quarto post body
 ) -> List[DerivedBlock]:  # Its derived blocks, in document order
-    """The Quarto archive profile: series callouts, the hand TOC, hand series-nav lines.
-    Blank lines between the body's start and its first block join that block, so no
-    whitespace-only content section is left behind."""
+    """The Quarto archive profile: series callouts, the hand TOC, hand series-nav lines, the
+    site-chrome includes. Blank lines between the body's start and its first block join that
+    block, so no whitespace-only content section is left behind."""
     blocks = [DerivedBlock(SERIES_CALLOUT, s, e) for s, e in find_series_callouts(body)]
     taken = [(b.start, b.end) for b in blocks]
     blocks += [DerivedBlock(HAND_TOC, s, e) for s, e in find_hand_toc(body, taken)]
     taken = [(b.start, b.end) for b in blocks]
     blocks += [DerivedBlock(SERIES_NAV_LINE, s, e) for s, e in find_series_nav_lines(body, taken)]
+    taken = [(b.start, b.end) for b in blocks]
+    blocks += [DerivedBlock(CHROME_INCLUDE, s, e) for s, e in find_chrome_includes(body, taken)]
     blocks.sort(key=lambda b: b.start)
     if blocks and blocks[0].start and not body[:blocks[0].start].strip():
         blocks[0] = DerivedBlock(blocks[0].role, 0, blocks[0].end)
@@ -222,6 +244,15 @@ def block_link_targets(
     """A derived block's fingerprint for the render filter: its link targets as Pandoc hands
     them to a filter (text is typographically transformed, a target only URI-escaped)."""
     return [_pandoc_uri(m.group(1).strip()) for m in _LINK_TARGET_RE.finditer(text)]
+
+
+def include_target(
+    text: str,  # A chrome_include block's verbatim text
+) -> str:  # The included path as written ("/_about-author-cta.qmd"), "" when none
+    """A chrome include's fingerprint for the render filter: the partial it includes (the
+    filter parses that file and drops the blocks it expands to)."""
+    m = _INCLUDE_LINE_RE.search(text)
+    return m.group(1) if m else ""
 
 
 def _pandoc_uri(
