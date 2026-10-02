@@ -7,6 +7,7 @@ A Markdown decomposition core for context graphs: parses Markdown content (front
 ## Modules
 
 - **`cjm_markdown_decompose_core.__init__`**
+- **`cjm_markdown_decompose_core.blocks`** — Embedded DERIVED blocks: spans of a body that are not the document's own content.
 - **`cjm_markdown_decompose_core.extract`** — Map parsed Markdown onto dev-graph-schema nodes (coarse tier).
 - **`cjm_markdown_decompose_core.ingest`** — Flatten decomposed notes into graph elements for idempotent extension.
 - **`cjm_markdown_decompose_core.parse`** — Schema-free Markdown parsing (stdlib + PyYAML).
@@ -15,6 +16,19 @@ A Markdown decomposition core for context graphs: parses Markdown content (front
 - **`cjm_markdown_decompose_core.sections`** — Decompose a Markdown body into ordered Section nodes (the navigable unit).
 
 ## API
+
+### `cjm_markdown_decompose_core.blocks`
+
+- `DerivedBlock` _class_ — One derived block: its role and its `[start, end)` span of the body.
+- `block_link_targets` _function_ — A derived block's fingerprint for the render filter: its link targets as Pandoc hands
+- `derived_blocks` _function_ — Classify a body's derived blocks under its source profile.
+- `find_chrome_includes` _function_ — Site-chrome include lines: a line holding only `{{< include PATH >}}` whose PATH is one
+- `find_hand_toc` _function_ — The hand table of contents: the FIRST run of two or more anchor-link list lines at
+- `find_series_callouts` _function_ — The series callout(s): a top-level `::: {.callout-tip}` whose first line is a surveyed
+- `find_series_nav_lines` _function_ — Hand series-navigation lines: a heading holding only `Previous:` / `Next:` and links.
+- `include_target` _function_ — A chrome include's fingerprint for the render filter: the partial it includes (the
+- `mask_blocks` _function_ — The body a relation harvest reads: derived blocks contribute no edges (253ac996 (4)).
+- `quarto_derived_blocks` _function_ — The Quarto archive profile: series callouts, the hand TOC, hand series-nav lines, the
 
 ### `cjm_markdown_decompose_core.extract`
 
@@ -59,9 +73,9 @@ A Markdown decomposition core for context graphs: parses Markdown content (front
 - `detect_profile` _function_ — Detect the source-type profile from the frontmatter shape.
 - `harvest_aliases` _function_ — Harvest `aliases` (old URLs) -> bare permalinks (alternate identities).
 - `harvest_categories` _function_ — Harvest `categories` -> normalized Topic keys (the thematic-clustering facet).
-- `harvest_cross_post_links` _function_ — Harvest `/posts/...` markdown links -> (permalink, section anchor) pairs.
 - `harvest_relations` _function_ — Harvest a note's relationships using its (detected or given) source profile.
-- `harvest_series_links` _function_ — Harvest `/series/...` markdown links -> their VERBATIM targets (a page reference).
+- `harvest_site_links` _function_ — Harvest every in-body link to a site PAGE -> its VERBATIM target (ruling d31e9ba7).
+- `is_page_target` _function_ — A link to a page, not to a file: an image, video or download beside a post is never a
 - `is_site_link` _function_ — A link into the site: relative or rooted, or an absolute URL on the site's own host.
 - `normalize_permalink` _function_ — Reduce a post link to its bare permalink — the path AFTER `posts/`.
 - `quarto_site_url` _function_ — The site URL of the Quarto project a file belongs to (ruling 260119bf).
