@@ -1,8 +1,10 @@
-"""Derived blocks (design 253ac996): classification, typed sections, harvest masking."""
+"""Derived blocks (design 253ac996): classification, typed sections, harvest masking; fenced
+blocks (ruling d5442ba8): tabsets and callouts whose headings open no section."""
 
 from cjm_markdown_decompose_core.blocks import (
-    CHROME_INCLUDE, HAND_TOC, SERIES_CALLOUT, SERIES_NAV_LINE, block_link_targets,
-    derived_blocks, include_target, mask_blocks, quarto_derived_blocks)
+    CALLOUT, CHROME_INCLUDE, HAND_TOC, SERIES_CALLOUT, SERIES_NAV_LINE, TABSET, block_link_targets,
+    derived_blocks, fenced_block_parts, fenced_blocks, include_target, mask_blocks,
+    quarto_derived_blocks, quarto_fenced_blocks)
 from cjm_markdown_decompose_core.extract import note_from_text
 from cjm_markdown_decompose_core.sections import CONTINUATION_SEP, PREAMBLE_ANCHOR
 
@@ -36,6 +38,49 @@ Setup steps.
 More setup.
 
 {{< include /_about-author-cta.qmd >}}
+"""
+
+# Fenced blocks (ruling d5442ba8): a tabset, a titled callout, a layout div, a fenced-code
+# example of a tabset, and a real heading sharing a tab's slug.
+TABBED = """
+## Setting Up a Python Environment
+
+Pick a package manager.
+
+::: {.panel-tabset}
+## Mamba
+```bash
+mamba create -n env python=3.11 -y
+```
+## Conda
+::: {.callout-tip}
+## Tip inside a tab
+:::
+```bash
+conda create -n env python=3.11 -y
+```
+:::
+
+### Install PyTorch
+
+::: {.callout-note title="Processing on GPUs"}
+##### Streaming Multiprocessors
+SMs run threads.
+:::
+
+::: {.home-entry-head}
+## Layout Heading
+:::
+
+```markdown
+::: {.panel-tabset}
+## Not A Tab
+:::
+```
+
+## Mamba
+
+A real section sharing a tab's slug.
 """
 
 
@@ -148,3 +193,53 @@ def test_crlf_bodies_classify_and_round_trip():
     assert [s.block_role for s in note.sections if s.block_role] == [SERIES_CALLOUT, HAND_TOC, SERIES_NAV_LINE,
                                                                      CHROME_INCLUDE]
     assert "-----\r\n" in next(s.raw for s in note.sections if s.block_role == HAND_TOC)
+
+
+def test_fenced_blocks_are_the_outermost_tabsets_and_callouts():
+    blocks = quarto_fenced_blocks(TABBED)
+    assert [b.kind for b in blocks] == [TABSET, CALLOUT]  # the tip in a tab is the tabset's; the layout div and the code example are none
+    assert TABBED[blocks[0].start:].startswith("::: {.panel-tabset}\n## Mamba")
+    assert TABBED[:blocks[0].end].endswith("```\n:::\n")
+    assert blocks[1].attrs == '{.callout-note title="Processing on GPUs"}'
+    assert fenced_blocks(TABBED, "memory") == [] and fenced_blocks(TABBED, "quarto_post") == blocks
+
+
+def test_fence_kinds_read_classes_never_quoted_values():
+    body = ("::: callout-warning\n:::\n"
+            "::: {#tip .callout-tip}\n:::\n"
+            '::: {.column-margin title="see .callout-note"}\n:::\n'
+            "::: {.panel-tabset .nav-pills}\n:::\n")
+    assert [b.kind for b in quarto_fenced_blocks(body)] == [CALLOUT, CALLOUT, TABSET]
+
+
+def test_parts_are_a_tabsets_tabs_and_a_callouts_title():
+    tabset, callout = quarto_fenced_blocks(TABBED)
+    tabs = fenced_block_parts(TABBED, tabset)
+    assert [label for label, _, _ in tabs] == ["Mamba", "Conda"]  # the nested tip's heading opens no tab
+    assert TABBED[tabs[0][1]:tabs[0][2]].startswith("## Mamba\n```bash") and tabs[1][2] == tabset.end
+    assert fenced_block_parts(TABBED, callout) == [("Processing on GPUs", callout.start, callout.end)]
+    body = "::: {.callout-caution}\n## Mind the pins\nText.\n:::\n"
+    assert fenced_block_parts(body, quarto_fenced_blocks(body)[0])[0][0] == "Mind the pins"
+
+
+def test_a_fenced_heading_opens_no_section_and_the_outline_resumes():
+    note = note_from_text("/c/p/index.md", FM + TABBED, profile="quarto_post", lossless=True)
+    secs = note.sections
+    assert note.frontmatter_raw + "".join(s.raw for s in secs) == FM + TABBED
+    assert [(s.anchor, s.level, s.parent_anchor) for s in secs] == [
+        (PREAMBLE_ANCHOR, 0, None),
+        ("setting-up-a-python-environment", 2, None),               # its tabset stays in its text
+        ("install-pytorch", 3, "setting-up-a-python-environment"),  # never parented to a tab
+        ("layout-heading", 2, None),                                # a layout div's heading stays a Section
+        ("mamba-1", 2, None),                                       # the tab took `mamba`, as Pandoc numbers it
+    ]
+    assert "## Conda" in secs[1].text and "##### Streaming Multiprocessors" in secs[2].text
+    crlf = note_from_text("/c/p/index.md", (FM + TABBED).replace("\n", "\r\n"), profile="quarto_post",
+                          lossless=True)
+    assert [s.anchor for s in crlf.sections] == [s.anchor for s in secs]
+
+
+def test_a_profile_without_fences_sections_every_heading():
+    anchors = [s.anchor for s in note_from_text("/c/p/index.md", FM + TABBED, profile="memory",
+                                                lossless=True).sections]
+    assert "mamba" in anchors and "conda" in anchors and "streaming-multiprocessors" in anchors

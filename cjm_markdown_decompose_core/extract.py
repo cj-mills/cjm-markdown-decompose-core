@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional
 from cjm_context_graph_primitives.provenance import SourceRef
 from cjm_dev_graph_schema.nodes import NoteNode
 
-from .blocks import derived_blocks
+from .blocks import derived_blocks, fenced_blocks
 from .parse import parse_markdown, ParsedMarkdown
 from .relations import detect_profile, harvest_relations
 from .sections import decompose_sections
@@ -129,11 +129,14 @@ def note_from_parsed(
 
     The body's DERIVED blocks (`blocks`, design 253ac996) are classified once under the
     note's profile and handed to both the harvest (which skips them) and the sectioning
-    (which types them), so the two can never disagree on what is content."""
+    (which types them), so the two can never disagree on what is content. Its FENCED blocks
+    (ruling d5442ba8: tabsets, callouts) go to the sectioning too, where a heading inside one
+    opens no Section."""
     fm = parsed.frontmatter
     slug = slug or slug_from(path, fm, corpus_root)
     description = fm.get("description")
     blocks = derived_blocks(parsed.body, profile or detect_profile(fm))
+    fences = fenced_blocks(parsed.body, profile or detect_profile(fm))
     rel = harvest_relations(parsed, profile, path, blocks=blocks)
     note = NoteNode(
         slug=slug,
@@ -152,7 +155,7 @@ def note_from_parsed(
     )
     if with_sections or lossless:
         note.sections = decompose_sections(parsed.body, note.id, path, lossless=lossless,
-                                           blocks=blocks)
+                                           blocks=blocks, fences=fences)
     return note
 
 

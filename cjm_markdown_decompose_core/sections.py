@@ -24,7 +24,7 @@ from typing import List, Sequence
 from cjm_context_graph_primitives.provenance import SourceRef
 from cjm_dev_graph_schema.nodes import SectionNode
 
-from .blocks import DerivedBlock
+from .blocks import DerivedBlock, FencedBlock
 from .parse import find_headings
 
 
@@ -67,6 +67,7 @@ def decompose_sections(
     path: str = "",       # Source file path (provenance locator)
     lossless: bool = False,  # Lossless mode (memory): also store each section's heading-inclusive verbatim `raw` span + a level-0 preamble region, so concatenating every `raw` in order reproduces the body byte-for-byte
     blocks: Sequence[DerivedBlock] = (),  # The body's DERIVED blocks (`blocks.derived_blocks`): each becomes its own typed section, and a heading inside one opens nothing
+    fences: Sequence[FencedBlock] = (),   # The body's FENCED blocks (`blocks.fenced_blocks`): a heading inside one opens no section, its content staying in the section that holds it
 ) -> List[SectionNode]:  # Ordered Section nodes (document order; preamble first in lossless mode)
     """Decompose a body into ordered `SectionNode`s (heading-delimited).
 
@@ -96,14 +97,27 @@ def decompose_sections(
     the preamble; content RESUMING a region the block interrupted is a continuation
     section `<region anchor>~<n>` (level 0, parent the region's heading), so the `raw`
     spans still concatenate to the body byte-for-byte. A body with no blocks decomposes
-    exactly as before."""
+    exactly as before.
+
+    FENCED BLOCKS (ruling d5442ba8 on finding 67a54d21): a heading inside a block in `fences`
+    -- a tab's label, a callout's title -- opens no section: the block's text stays in the
+    section that holds it, and the outline resumes there after the block closes, so a later
+    sub-heading is never parented to a tab. Such a heading still takes its anchor in document
+    order, as Pandoc numbers every heading, so a later heading sharing its slug keeps the
+    `-1/-2` suffix its rendered page gives it."""
     spans = [(b.start, b.end) for b in blocks]
-    matches = [m for m in find_headings(body) if not any(s <= m.start() < e for s, e in spans)]
-    heads = {m.start(): m for m in matches}
+    found = [m for m in find_headings(body) if not any(s <= m.start() < e for s, e in spans)]
+    seen = {}                 # base anchor -> occurrence count (for -1/-2 disambiguation)
+    anchors = {}              # heading offset -> its anchor, a fenced heading's included
+    for m in found:
+        base = heading_anchor(m.group(2).strip())
+        n = seen.get(base, 0)
+        seen[base] = n + 1
+        anchors[m.start()] = base if n == 0 else f"{base}-{n}"
+    heads = {m.start(): m for m in found if not any(f.start <= m.start() < f.end for f in fences)}
     starts = {b.start: b for b in blocks}
     cuts = sorted({0, len(body)} | set(heads) | {p for s in spans for p in s})
     sections: List[SectionNode] = []
-    seen = {}                 # base anchor -> occurrence count (for -1/-2 disambiguation)
     roles_seen = {}           # block role -> occurrence count
     stack: List = []          # (level, anchor) of open ancestors, for parent resolution
     region = None             # the current region's head anchor (None before any content)
@@ -130,10 +144,7 @@ def decompose_sections(
             m = heads[a]
             level = len(m.group(1))
             title = m.group(2).strip()
-            base = heading_anchor(title)
-            n = seen.get(base, 0)
-            seen[base] = n + 1
-            anchor = base if n == 0 else f"{base}-{n}"
+            anchor = anchors[a]
             while stack and stack[-1][0] >= level:
                 stack.pop()
             parent_anchor = stack[-1][1] if stack else None

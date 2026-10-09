@@ -13,18 +13,31 @@ the render and projects the replacement.
 Classification is per source profile, like the relation harvest: a profile maps a body
 to its derived blocks, and a profile with none (the memory corpus) returns nothing. The
 rules are exact shapes, surveyed over the whole archive (zero false positives): a rule
-that cannot tell a block from content leaves it content."""
+that cannot tell a block from content leaves it content.
+
+FENCED blocks are the other kind (ruling d5442ba8 on finding 67a54d21): content divs -- a
+tabset, a callout -- whose headings are the div's own structure, never Sections. They stay
+content inside the Section that holds them (a heading inside one opens nothing), and their
+parts -- a tabset's tabs as variants, a callout's title -- are derived from the text at read
+(`fenced_block_parts`), never stored."""
 
 import re
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Sequence, Tuple
 
-from .parse import fenced_code_spans
+from .parse import fenced_code_spans, find_headings
 
 SERIES_CALLOUT = "series_callout"    # the "part of the following series" callout
 HAND_TOC = "hand_toc"                # the hand-written table of contents
 SERIES_NAV_LINE = "series_nav_line"  # a hand "### Previous: [Part N](...)" / "Next:" line
 CHROME_INCLUDE = "chrome_include"    # an include of site chrome (the author / questions callouts)
+
+# FENCED blocks (ruling d5442ba8 on finding 67a54d21): content divs whose headings are the
+# div's own structure, never Sections -- a tab's heading labels its variant, a callout's heading
+# is its title. Only these kinds: a layout div (the site pages' `.home-entry-head`) holds a
+# section's heading as the section itself, so its headings stay Sections.
+TABSET = "tabset"    # a `::: {.panel-tabset}`: each tab a variant, its heading the label
+CALLOUT = "callout"  # a `::: {.callout-*}`: its heading (or title attribute) the title
 
 # The site-chrome includes (finding 7ca35b0b; design 39c51c15 (5)): surveyed over the whole
 # archive — the about-author callout closes all 210 posts, the questions callout sits in 32.
@@ -45,6 +58,10 @@ _CALLOUT_TITLES = (
 _DIV_CLOSE_RE = re.compile(r"^:::[ \t]*\r?$\n?", re.M)
 # A div fence line: an opener (`::: {.x}` / `::: name`) or a bare closer.
 _DIV_LINE_RE = re.compile(r"^(:{3,})[ \t]*(.*?)[ \t]*\r?$")
+# A class in a div opener's braces: a `.name` starting an attribute (a quoted title may hold dots).
+_DIV_CLASS_RE = re.compile(r"(?:^\{|\s)\.([\w-]+)")
+# A callout's title attribute.
+_TITLE_ATTR_RE = re.compile(r'\btitle="([^"]*)"')
 # One hand-TOC item: a list line whose only content is a link to an in-page anchor.
 _TOC_LINE_RE = re.compile(r"^[ \t]*[*-][ \t]+\[[^\]\n]*\]\(#[^)\n]*\)[ \t]*\r?$")
 # A thematic break closing a hand TOC (the book-chapter posts' `-----`).
@@ -68,6 +85,17 @@ class DerivedBlock:
     role: str   # SERIES_CALLOUT | HAND_TOC | SERIES_NAV_LINE | CHROME_INCLUDE
     start: int  # Span start (character offset into the body)
     end: int    # Span end (exclusive), trailing blank lines included
+
+
+@dataclass(frozen=True)
+class FencedBlock:
+    """One content div whose headings open no Section (ruling d5442ba8 on finding 67a54d21):
+    its kind, its `[start, end)` span of the body (opener line through closer line) and the
+    opener's attributes as written."""
+    kind: str   # TABSET | CALLOUT
+    start: int  # Span start (the opener line's offset)
+    end: int    # Span end (exclusive), through the closer line
+    attrs: str  # The opener's attributes as written ('{.callout-note title="..."}')
 
 
 def _in_spans(pos: int, spans: Sequence[Tuple[int, int]]) -> bool:
@@ -207,9 +235,94 @@ def quarto_derived_blocks(
     return blocks
 
 
+def _div_spans(
+    body: str,  # Document body
+) -> List[Tuple[int, int, str, int]]:  # [(start, end, attrs, depth)] per div, in opener order
+    """Every div fence pair of the body, nested ones included. Div fences pair by depth
+    (Pandoc's fenced_divs: an opener is 3+ colons with attributes, a closer 3+ colons alone)
+    and fenced code is skipped, so a `:::` line inside a code block is code. A span runs from
+    its opener line through its closer line; an unclosed div runs to the end of the body, as
+    Pandoc reads it. `depth` is 0 for a top-level div."""
+    code = fenced_code_spans(body)
+    out: List[Tuple[int, int, str, int]] = []
+    stack: List[Tuple[int, str]] = []  # (opener offset, attrs) per open div
+    for off, line in _lines(body):
+        if _in_spans(off, code):
+            continue
+        d = _DIV_LINE_RE.match(line.rstrip("\n"))
+        if not d:
+            continue
+        if d.group(2):
+            stack.append((off, d.group(2)))
+        elif stack:
+            start, attrs = stack.pop()
+            out.append((start, off + len(line), attrs, len(stack)))
+    while stack:
+        start, attrs = stack.pop()
+        out.append((start, len(body), attrs, len(stack)))
+    return sorted(out)
+
+
+def _fence_kind(
+    attrs: str,  # A div opener's attributes ("{.panel-tabset}", "callout-note", ...)
+) -> str:  # TABSET | CALLOUT, or "" for any other div
+    """The fenced-block kind a div opener names. Pandoc reads a bare word after the colons as
+    the div's one class, else the braces' `.class` entries -- read with every quoted value
+    blanked, so a title holding ` .callout-note` names no class."""
+    if attrs.startswith("{"):
+        classes = _DIV_CLASS_RE.findall(re.sub(r'"[^"]*"', '""', attrs))
+    else:
+        classes = attrs.split()[:1]
+    if "panel-tabset" in classes:
+        return TABSET
+    if any(c == "callout" or c.startswith("callout-") for c in classes):
+        return CALLOUT
+    return ""
+
+
+def quarto_fenced_blocks(
+    body: str,  # A Quarto post body
+) -> List[FencedBlock]:  # The outermost tabset / callout divs, in document order
+    """The Quarto profile's fenced blocks: the tabset and callout divs whose headings open no
+    Section (ruling d5442ba8). The OUTERMOST qualifying div is the block -- a callout inside a
+    tab belongs to its tabset -- while one nested in a layout div is still found; the layout
+    div itself is no block, so its headings stay Sections."""
+    typed = [(s, e, a, _fence_kind(a)) for s, e, a, _ in _div_spans(body)]
+    typed = [t for t in typed if t[3]]
+    return [FencedBlock(k, s, e, a) for s, e, a, k in typed
+            if not any(s2 < s and e <= e2 for s2, e2, _, _ in typed)]
+
+
+def fenced_block_parts(
+    body: str,           # Document body
+    block: FencedBlock,  # One of its fenced blocks
+) -> List[Tuple[str, int, int]]:  # [(label, start, end)]: a tabset's tabs; a callout's one title entry spanning the block
+    """A fenced block's typed parts (ruling d5442ba8 (1)/(2)), derived from the text at read,
+    never stored. A TABSET's variants are its tabs: each heading at the shallowest heading
+    level directly inside it (never inside a div nested in it) opens a tab labelled by the
+    heading's text, running to the next such heading or the block's end. A CALLOUT's title is
+    its `title=` attribute, else the text of its first heading, else ""."""
+    inner = [(s, e) for s, e, _, _ in _div_spans(body) if block.start < s and e <= block.end]
+    heads = [m for m in find_headings(body)
+             if block.start <= m.start() < block.end and not _in_spans(m.start(), inner)]
+    if block.kind == CALLOUT:
+        t = _TITLE_ATTR_RE.search(block.attrs)
+        title = t.group(1) if t else (heads[0].group(2).strip() if heads else "")
+        return [(title, block.start, block.end)]
+    if not heads:
+        return []
+    level = min(len(m.group(1)) for m in heads)
+    tabs = [m for m in heads if len(m.group(1)) == level]
+    ends = [m.start() for m in tabs[1:]] + [block.end]
+    return [(m.group(2).strip(), m.start(), e) for m, e in zip(tabs, ends)]
+
+
 # Source-type profiles (the keys of `relations.PROFILES`); a profile absent here has none.
 DERIVED_BLOCK_PROFILES: Dict[str, Callable[[str], List[DerivedBlock]]] = {
     "quarto_post": quarto_derived_blocks,
+}
+FENCED_BLOCK_PROFILES: Dict[str, Callable[[str], List[FencedBlock]]] = {
+    "quarto_post": quarto_fenced_blocks,
 }
 
 
@@ -219,6 +332,15 @@ def derived_blocks(
 ) -> List[DerivedBlock]:  # The body's derived blocks, in document order ([] for a profile with none)
     """Classify a body's derived blocks under its source profile."""
     fn = DERIVED_BLOCK_PROFILES.get(profile)
+    return fn(body) if fn else []
+
+
+def fenced_blocks(
+    body: str,     # Document body
+    profile: str,  # The source profile key (already resolved, see `relations.detect_profile`)
+) -> List[FencedBlock]:  # The body's fenced blocks, in document order ([] for a profile with none)
+    """Classify a body's fenced blocks under its source profile."""
+    fn = FENCED_BLOCK_PROFILES.get(profile)
     return fn(body) if fn else []
 
 
