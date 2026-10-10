@@ -64,6 +64,7 @@ A Markdown decomposition core for context graphs: parses Markdown content (front
 ### `cjm_markdown_decompose_core.project`
 
 - `compose_note_text` _function_ — Compose a note's text from its Sections' own state walked by the outline relations.
+- `element_state` _function_ — An element's own STATE as a graph-sourced note journals it (design amendment 56b24fd5
 - `first_sentence` _function_ — A deterministic terse hook: the description's first sentence, capped.
 - `note_index_line` _function_ — Render one index line from a note's frontmatter-derived fields.
 - `note_text_from_graph_nodes` _function_ — Reconstruct a note's file text FROM the graph (frontmatter_raw + ordered raw spans).
