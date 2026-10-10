@@ -356,3 +356,14 @@ def section_outline(
         if s.next_anchor:
             following[s.id] = section_node_id(s.note_id, s.next_anchor)
     return parent, following
+
+
+def element_state(
+    s: Any,  # A Section (SectionNode, typed GraphNode or wire dict)
+) -> Tuple[Optional[str], str]:  # (its title -- None for an unheaded element --, its own text with the surrounding blank lines trimmed)
+    """An element's own STATE as a graph-sourced note journals it (design amendment 56b24fd5
+    (1)): its title, None for a preamble, a derived block or a continuation, and its text with
+    the blank lines around it left to the composition -- exactly what `compose_note_text`
+    renders it from, so a note captured from these states composes to the same text."""
+    _, headed, title, body = _section_state(s)
+    return (title if headed else None), body

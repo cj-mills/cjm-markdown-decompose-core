@@ -6,7 +6,8 @@ from cjm_dev_graph_schema.identity import note_node_id, section_node_id
 from cjm_dev_graph_schema.vocab import DevNodeKinds, DevRelations
 from cjm_markdown_decompose_core.extract import note_from_text
 
-from cjm_markdown_decompose_core.project import compose_note_text, render_note_text, section_outline
+from cjm_markdown_decompose_core.project import (compose_note_text, element_state, render_note_text,
+                                                 section_outline)
 from cjm_markdown_decompose_core.sections import decompose_sections, heading_anchor
 
 DOC = """Preamble prose (not a section in v1).
@@ -265,3 +266,12 @@ def test_a_heading_line_an_open_block_absorbs_is_no_section():
     # A post's profile switches it on.
     post = note_from_text("/c/posts/p/index.md", body, corpus_root="/c/posts", profile="quarto_post", lossless=True)
     assert "glued" not in {s.anchor for s in post.sections}
+
+
+def test_element_state_is_what_the_composition_renders():
+    # The element's own state a graph-sourced note journals (design amendment 56b24fd5 (1)): the
+    # title (None unheaded) and the text, its surrounding blank lines the composition's.
+    text = "---\ntitle: \"T\"\n---\n\nLede.\n\n## A\n\na  \n\n\n### B\n\nb\n"
+    note = note_from_text("/c/p/index.md", text, corpus_root="/c", profile="quarto_post", lossless=True)
+    states = [element_state(s) for s in note.sections]
+    assert states == [(None, "Lede."), ("A", "a  "), ("B", "b")]
