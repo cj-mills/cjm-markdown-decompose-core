@@ -20,8 +20,11 @@ A Markdown decomposition core for context graphs: parses Markdown content (front
 ### `cjm_markdown_decompose_core.blocks`
 
 - `DerivedBlock` _class_ — One derived block: its role and its `[start, end)` span of the body.
+- `FencedBlock` _class_ — One content div whose headings open no Section (ruling d5442ba8 on finding 67a54d21):
 - `block_link_targets` _function_ — A derived block's fingerprint for the render filter: its link targets as Pandoc hands
 - `derived_blocks` _function_ — Classify a body's derived blocks under its source profile.
+- `fenced_block_parts` _function_ — A fenced block's typed parts (ruling d5442ba8 (1)/(2)), derived from the text at read,
+- `fenced_blocks` _function_ — Classify a body's fenced blocks under its source profile.
 - `find_chrome_includes` _function_ — Site-chrome include lines: a line holding only `{{< include PATH >}}` whose PATH is one
 - `find_hand_toc` _function_ — The hand table of contents: the FIRST run of two or more anchor-link list lines at
 - `find_series_callouts` _function_ — The series callout(s): a top-level `::: {.callout-tip}` whose first line is a surveyed
@@ -29,6 +32,7 @@ A Markdown decomposition core for context graphs: parses Markdown content (front
 - `include_target` _function_ — A chrome include's fingerprint for the render filter: the partial it includes (the
 - `mask_blocks` _function_ — The body a relation harvest reads: derived blocks contribute no edges (253ac996 (4)).
 - `quarto_derived_blocks` _function_ — The Quarto archive profile: series callouts, the hand TOC, hand series-nav lines, the
+- `quarto_fenced_blocks` _function_ — The Quarto profile's fenced blocks: the tabset and callout divs whose headings open no
 
 ### `cjm_markdown_decompose_core.extract`
 
@@ -47,6 +51,7 @@ A Markdown decomposition core for context graphs: parses Markdown content (front
 ### `cjm_markdown_decompose_core.parse`
 
 - `ParsedMarkdown` _class_ — The structural decomposition of one Markdown document.
+- `absorbs_next_line` _function_ — Whether `line` leaves a block open that takes the next line as its own, so an ATX line
 - `extract_headings` _function_ — Extract ATX headings (`#`..`######`) as (level, text) pairs.
 - `extract_wiki_links` _function_ — Extract `[[wiki-link]]` targets from the body, de-duplicated, order-preserved.
 - `fenced_code_spans` _function_ — Locate fenced code blocks (``` / ~~~) as character spans of the body.
@@ -58,6 +63,7 @@ A Markdown decomposition core for context graphs: parses Markdown content (front
 
 ### `cjm_markdown_decompose_core.project`
 
+- `compose_note_text` _function_ — Compose a note's text from its Sections' own state walked by the outline relations.
 - `first_sentence` _function_ — A deterministic terse hook: the description's first sentence, capped.
 - `note_index_line` _function_ — Render one index line from a note's frontmatter-derived fields.
 - `note_text_from_graph_nodes` _function_ — Reconstruct a note's file text FROM the graph (frontmatter_raw + ordered raw spans).
@@ -66,6 +72,7 @@ A Markdown decomposition core for context graphs: parses Markdown content (front
 - `render_memory_index_from_graph_nodes` _function_ — Render the memory index FROM queried graph nodes (the self-hosting path).
 - `render_note_text` _function_ — Reassemble a note's exact file text from its verbatim parts (lossless mode).
 - `render_onboarding_surface` _function_ — Render the onboarding surface: orientation + how-to-query + resident PUSH core + landmark map + how-to-pull.
+- `section_outline` _function_ — The outline relations of decomposed Sections, keyed by Section id -- the same
 
 ### `cjm_markdown_decompose_core.relations`
 
@@ -89,4 +96,4 @@ A Markdown decomposition core for context graphs: parses Markdown content (front
 ## Dependencies
 
 **Depends on:** `cjm-context-graph-layer`, `cjm-context-graph-primitives`, `cjm-dev-graph-schema`, `pyyaml`
-**Used by:** `cjm-context-graph-projection`, `cjm-notebook-decompose-core`
+**Used by:** `cjm-context-graph-projection`, `cjm-notebook-decompose-core`, `cjm-substrate`
