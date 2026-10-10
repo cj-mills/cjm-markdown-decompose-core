@@ -9,8 +9,10 @@ a graph query.
 """
 
 import os
+import re
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+from cjm_dev_graph_schema.identity import section_node_id
 from cjm_dev_graph_schema.nodes import NoteNode, SectionNode
 
 # Default category section order + display headings for the memory index.
@@ -22,6 +24,10 @@ _SECTION_HEADINGS = {
     "user": "User",
 }
 _UNCATEGORIZED = "Other"
+
+# The composed note (design 56c9c332): the heading level a top-level Section renders at --
+# the quarto_post presentation, a post's title is its H1, its top-level Sections H2.
+COMPOSED_TOP_LEVEL = 2
 
 
 def note_index_line(
@@ -251,3 +257,102 @@ def note_text_from_graph_nodes(
         key=lambda t: t[0],
     )
     return frontmatter_raw + "".join(raw for _, raw in spans)
+
+
+# --- The composed note (design 56c9c332: the element is the source unit) ----------
+#
+# A note's text COMPOSED from its elements' own state and the outline relations: the
+# Note's frontmatter, then the outline walked by PART_OF (the parent) and NEXT (sibling
+# order), each Section's own text before its children. A headed Section renders as
+# '#' x level + one space + its title + its text, the level DERIVED from its depth (the
+# top level at `top_level`, default COMPOSED_TOP_LEVEL), a blank line, then its body;
+# an unheaded one (the preamble, a derived block, a continuation) renders its body. An
+# element's state is its text with the surrounding blank lines trimmed: the separators
+# are the composition's -- one blank line after the frontmatter and between elements,
+# one final newline -- so a reorder never glues a heading to the paragraph before it.
+# Never a concatenation of stored `raw` spans: this is the form a cut-over note's file
+# takes, and composed == the captured blob is the cutover's gate (the round trip).
+
+def _section_state(
+    s: Any,  # A Section (SectionNode, typed GraphNode or wire dict)
+) -> Tuple[str, bool, str, str]:  # (id, headed, title, own text after the heading line)
+    """A Section's own state for composition. `level` is read only as headed-or-not: the
+    depth it renders at is derived from the outline, never from the stored number."""
+    if isinstance(s, SectionNode):
+        sid, headed, title, text = s.id, s.level > 0, s.title, s.text
+    else:
+        sid = str(s.id if hasattr(s, "id") else s["id"])
+        headed = int(_node_field(s, "level", 0) or 0) > 0
+        title, text = _node_field(s, "title", "") or "", _node_field(s, "text", "") or ""
+    # The blank lines around an element are the composition's, never its content -- whole blank
+    # lines only: the last content line keeps its trailing spaces (an empty list item is `* `).
+    body = re.sub(r"(?:\n[ \t]*)+\Z", "", re.sub(r"\A(?:[ \t]*\n)+", "", text))
+    return sid, headed, title, body if body.strip() else ""
+
+
+def compose_note_text(
+    frontmatter_raw: str,        # The Note's verbatim frontmatter ("" when none)
+    sections: Iterable[Any],     # The note's Sections (SectionNode, typed GraphNode or wire dict)
+    parent: Dict[str, str],      # Section id -> its enclosing Section's id (PART_OF); absent at the top level
+    following: Dict[str, str],   # Section id -> its next sibling's id (NEXT); absent for a last sibling
+    top_level: Optional[int] = None,  # The heading level a top-level Section renders at (None = COMPOSED_TOP_LEVEL)
+) -> str:  # The composed note text
+    """Compose a note's text from its Sections' own state walked by the outline relations.
+
+    Each parent's children are ordered by the NEXT chain (exactly one first child, every
+    child on the chain once); a malformed outline -- two first children, a cycle, a NEXT to
+    a non-sibling -- raises ValueError, never a silently reordered note."""
+    top_level = COMPOSED_TOP_LEVEL if top_level is None else top_level
+    by_id: Dict[str, Tuple[str, bool, str, str]] = {}
+    for s in sections:
+        st = _section_state(s)
+        by_id[st[0]] = st
+    children: Dict[Optional[str], List[str]] = {}
+    for sid in by_id:
+        children.setdefault(parent.get(sid), []).append(sid)
+
+    def ordered(ids: List[str]) -> List[str]:
+        if not ids:
+            return []
+        pool = set(ids)
+        firsts = [i for i in ids if i not in {following.get(j) for j in ids}]
+        if len(firsts) != 1:
+            raise ValueError(f"outline: {len(firsts)} first siblings among {sorted(pool)[:4]}")
+        seq = [firsts[0]]
+        while following.get(seq[-1]) is not None and len(seq) <= len(pool):
+            seq.append(following[seq[-1]])
+        if len(seq) != len(pool) or set(seq) != pool:
+            raise ValueError(f"outline: the NEXT chain from {firsts[0]} does not cover its siblings once")
+        return seq
+
+    parts: List[str] = []
+
+    def walk(sid: str, depth: int) -> None:
+        _, headed, title, body = by_id[sid]
+        if headed:
+            parts.append("#" * (top_level + depth) + " " + title + ("\n\n" + body if body else ""))
+        elif body:  # a whitespace-only region carries nothing to compose
+            parts.append(body)
+        for c in ordered(children.get(sid, [])):
+            walk(c, depth + 1)
+
+    for sid in ordered(children.get(None, [])):
+        walk(sid, 0)
+    if not parts:
+        return frontmatter_raw
+    return frontmatter_raw + ("\n" if frontmatter_raw else "") + "\n\n".join(parts) + "\n"
+
+
+def section_outline(
+    sections: Iterable[SectionNode],  # A decomposed note's Sections
+) -> Tuple[Dict[str, str], Dict[str, str]]:  # (parent, following) maps by Section id, for `compose_note_text`
+    """The outline relations of decomposed Sections, keyed by Section id -- the same
+    PART_OF / NEXT pairs `SectionNode.structural_edges` puts on the graph."""
+    parent: Dict[str, str] = {}
+    following: Dict[str, str] = {}
+    for s in sections:
+        if s.parent_anchor:
+            parent[s.id] = section_node_id(s.note_id, s.parent_anchor)
+        if s.next_anchor:
+            following[s.id] = section_node_id(s.note_id, s.next_anchor)
+    return parent, following

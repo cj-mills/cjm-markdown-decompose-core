@@ -303,7 +303,7 @@ def fenced_block_parts(
     heading's text, running to the next such heading or the block's end. A CALLOUT's title is
     its `title=` attribute, else the text of its first heading, else ""."""
     inner = [(s, e) for s, e, _, _ in _div_spans(body) if block.start < s and e <= block.end]
-    heads = [m for m in find_headings(body)
+    heads = [m for m in find_headings(body, blank_before_heading=True)
              if block.start <= m.start() < block.end and not _in_spans(m.start(), inner)]
     if block.kind == CALLOUT:
         t = _TITLE_ATTR_RE.search(block.attrs)
@@ -324,6 +324,9 @@ DERIVED_BLOCK_PROFILES: Dict[str, Callable[[str], List[DerivedBlock]]] = {
 FENCED_BLOCK_PROFILES: Dict[str, Callable[[str], List[FencedBlock]]] = {
     "quarto_post": quarto_fenced_blocks,
 }
+# Profiles whose reader needs a blank line before a heading (Pandoc's blank_before_header, on in
+# Quarto): a glued ATX line is the text of the block above it, never a Section (design 56c9c332).
+BLANK_BEFORE_HEADING_PROFILES = frozenset({"quarto_post"})
 
 
 def derived_blocks(

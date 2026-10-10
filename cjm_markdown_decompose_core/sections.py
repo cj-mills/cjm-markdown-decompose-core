@@ -68,13 +68,17 @@ def decompose_sections(
     lossless: bool = False,  # Lossless mode (memory): also store each section's heading-inclusive verbatim `raw` span + a level-0 preamble region, so concatenating every `raw` in order reproduces the body byte-for-byte
     blocks: Sequence[DerivedBlock] = (),  # The body's DERIVED blocks (`blocks.derived_blocks`): each becomes its own typed section, and a heading inside one opens nothing
     fences: Sequence[FencedBlock] = (),   # The body's FENCED blocks (`blocks.fenced_blocks`): a heading inside one opens no section, its content staying in the section that holds it
+    blank_before_heading: bool = False,   # The profile's reader needs a blank line before a heading (`parse.find_headings`): a glued ATX line opens no section
 ) -> List[SectionNode]:  # Ordered Section nodes (document order; preamble first in lossless mode)
     """Decompose a body into ordered `SectionNode`s (heading-delimited).
 
     Each heading opens a section whose text runs to the next heading of ANY level
     (immediate prose only; subsections are separate nodes). Duplicate anchors are
     disambiguated `-1/-2` in document order (Pandoc's rule). The parent is the
-    nearest preceding heading of a SHALLOWER level (the `PART_OF` hierarchy).
+    nearest preceding heading of a SHALLOWER level (the `PART_OF` hierarchy), and
+    each section names the sibling after it under the same parent (`next_anchor`,
+    the `NEXT` relation -- design 56c9c332 (3)), so the outline walked by parent and
+    sibling order reproduces document order: a section's own span before its children.
 
     Two modes. **Scope A** (`lossless=False`, the posts corpus): faithful at the
     section grain only — `text` excludes the heading line and preamble before the
@@ -106,7 +110,7 @@ def decompose_sections(
     order, as Pandoc numbers every heading, so a later heading sharing its slug keeps the
     `-1/-2` suffix its rendered page gives it."""
     spans = [(b.start, b.end) for b in blocks]
-    found = [m for m in find_headings(body) if not any(s <= m.start() < e for s, e in spans)]
+    found = [m for m in find_headings(body, blank_before_heading) if not any(s <= m.start() < e for s, e in spans)]
     seen = {}                 # base anchor -> occurrence count (for -1/-2 disambiguation)
     anchors = {}              # heading offset -> its anchor, a fenced heading's included
     for m in found:
@@ -158,4 +162,10 @@ def decompose_sections(
         elif region != PREAMBLE_ANCHOR or lossless:  # content resuming a region a block interrupted
             resumed += 1
             emit(f"{region}{CONTINUATION_SEP}{resumed}", 0, "", span, span, enclosing)
+    last = {}                 # parent anchor -> its latest child so far (None = the note's top level)
+    for s in sections:        # order as a relation: each sibling names the one after it (NEXT)
+        prev = last.get(s.parent_anchor)
+        if prev is not None:
+            prev.next_anchor = s.anchor
+        last[s.parent_anchor] = s
     return sections

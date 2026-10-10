@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional
 from cjm_context_graph_primitives.provenance import SourceRef
 from cjm_dev_graph_schema.nodes import NoteNode
 
-from .blocks import derived_blocks, fenced_blocks
+from .blocks import BLANK_BEFORE_HEADING_PROFILES, derived_blocks, fenced_blocks
 from .parse import parse_markdown, ParsedMarkdown
 from .relations import detect_profile, harvest_relations
 from .sections import decompose_sections
@@ -154,8 +154,9 @@ def note_from_parsed(
         frontmatter_raw=parsed.frontmatter_raw if lossless else "",
     )
     if with_sections or lossless:
-        note.sections = decompose_sections(parsed.body, note.id, path, lossless=lossless,
-                                           blocks=blocks, fences=fences)
+        note.sections = decompose_sections(
+            parsed.body, note.id, path, lossless=lossless, blocks=blocks, fences=fences,
+            blank_before_heading=(profile or detect_profile(fm)) in BLANK_BEFORE_HEADING_PROFILES)
     return note
 
 

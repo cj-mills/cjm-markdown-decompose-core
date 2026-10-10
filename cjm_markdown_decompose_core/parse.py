@@ -27,6 +27,11 @@ _INLINE_CODE_RE = re.compile(r"(`+)(?:.+?)\1")
 # 3+ backticks or 3+ tildes, then whatever follows (an opener's info string; a closer
 # allows only whitespace). `fenced_code_spans` pairs openers with closers.
 _FENCE_LINE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+# A line that closes or opens a block, so it leaves no paragraph open for the next line to continue:
+# a heading, a code or div fence, a thematic break, an HTML tag line, a table row.
+_BLOCK_EDGE_RE = re.compile(r"^ {0,3}(?:#{1,6}(?:[ \t]|$)|`{3,}|~{3,}|:{3,}|(?:[-*_][ \t]*){3,}$|<|\|)")
+# A list item's or block quote's leading marker (repeatable: `> * item`).
+_BLOCK_MARKER_RE = re.compile(r"^[ \t]*(?:>[ \t]?|(?:[*+-]|\d{1,9}[.)])(?:[ \t]+|$))")
 
 
 @dataclass
@@ -109,18 +114,49 @@ def fenced_code_spans(
     return spans
 
 
+def absorbs_next_line(
+    line: str,  # The line just before a candidate heading (no newline)
+) -> bool:  # True when the next line belongs to the block this line leaves open
+    """Whether `line` leaves a block open that takes the next line as its own, so an ATX line
+    right after it is that block's text and never a section heading -- as Pandoc reads it with
+    blank_before_header, which Quarto keeps on. Text leaves a paragraph open, and so does a list
+    item or block quote line with text after its marker (the line is a lazy continuation); an
+    EMPTY list item (`* `) takes the next line as its content (`<li><h3>`). A blank line, a
+    heading, a code or div fence, a thematic break, an HTML tag line and a table row leave none."""
+    if not line.strip() or _BLOCK_EDGE_RE.match(line):
+        return False
+    rest, listed = line, False
+    m = _BLOCK_MARKER_RE.match(rest)
+    while m and m.end() > 0:
+        listed = listed or not m.group(0).strip().startswith(">")
+        rest = rest[m.end():]
+        m = _BLOCK_MARKER_RE.match(rest)
+    return bool(rest.strip()) or listed
+
+
 def find_headings(
     body: str,  # Document body
+    blank_before_heading: bool = False,  # The reader needs a blank line before a heading (Pandoc's blank_before_header; the profile decides)
 ) -> List["re.Match[str]"]:  # ATX heading matches (group 1 = hashes, group 2 = text), fenced code skipped
     """The body's ATX heading matches, skipping every line inside a fenced code block.
 
     The ONE heading detector both `extract_headings` and the section splitter
     (`sections.decompose_sections`) read, so a `#` line inside a fence is never a
     heading on either path. Matches carry positions (`start`/`end`) so the splitter
-    can slice section bodies between consecutive headings."""
+    can slice section bodies between consecutive headings. Under `blank_before_heading` (the
+    reader a profile renders with -- Quarto's Pandoc for a post) an ATX line the line before
+    it absorbs (`absorbs_next_line`: an open paragraph, an empty list item) is no heading: a
+    `### $$...$$` line glued under a list item renders as that item's text or content, so it
+    opens no Section either (the archive cutover's round trip, design 56c9c332). A corpus no
+    such reader renders (the memory notes) keeps every ATX line a heading."""
     spans = fenced_code_spans(body)
+
+    def absorbed(start: int) -> bool:
+        return blank_before_heading and start > 0 and absorbs_next_line(
+            body[body.rfind("\n", 0, start - 1) + 1:start - 1])
+
     return [m for m in _HEADING_RE.finditer(body)
-            if not any(s <= m.start() < e for s, e in spans)]
+            if not any(s <= m.start() < e for s, e in spans) and not absorbed(m.start())]
 
 
 def extract_wiki_links(

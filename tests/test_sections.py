@@ -1,9 +1,12 @@
 """Body -> ordered Section nodes: anchors, hierarchy, verbatim text, disambiguation."""
 
+import pytest
+
 from cjm_dev_graph_schema.identity import note_node_id, section_node_id
 from cjm_dev_graph_schema.vocab import DevNodeKinds, DevRelations
 from cjm_markdown_decompose_core.extract import note_from_text
-from cjm_markdown_decompose_core.project import render_note_text
+
+from cjm_markdown_decompose_core.project import compose_note_text, render_note_text, section_outline
 from cjm_markdown_decompose_core.sections import decompose_sections, heading_anchor
 
 DOC = """Preamble prose (not a section in v1).
@@ -164,3 +167,101 @@ def test_note_from_text_lossless_round_trip_and_frontmatter_raw():
     assert render_note_text(note.frontmatter_raw, note.sections) == text
     # Lossless implies sectioning; Scope-A default still leaves frontmatter_raw empty.
     assert note_from_text("/mem/m.md", text).frontmatter_raw == ""
+
+
+def test_sections_name_their_next_sibling_under_the_same_parent():
+    secs = {s.anchor: s for s in decompose_sections(DOC, note_node_id("p"), lossless=True)}
+    # Top-level siblings (the preamble included) chain in document order; children chain under their parent.
+    assert [secs[a].next_anchor for a in ("_preamble", "setup", "setup-1")] == [
+        "setup", "setup-1", "loading-the-yolox-tiny-model"]
+    assert secs["install"].next_anchor == "configure" and secs["configure"].next_anchor is None
+    assert secs["loading-the-yolox-tiny-model"].next_anchor is None
+    # The NEXT edge rides structural_edges beside HAS_SECTION / PART_OF.
+    nxt = [e for e in secs["install"].structural_edges() if e["relation_type"] == "NEXT"]
+    assert [(e["source_id"], e["target_id"]) for e in nxt] == [
+        (secs["install"].id, section_node_id(note_node_id("p"), "configure"))]
+
+
+def test_composed_note_reproduces_a_canonical_post():
+    # A canonical post: frontmatter, a preamble, a derived series callout, a tabset whose tab
+    # headings stay inside their Section, nesting to H4 -- composed from state + relations.
+    text = ("---\ntitle: P\n---\n\nLede.\n\n"
+            "::: {.callout-tip}\n## This post is part of the following series:\n"
+            "* [**The Series**](/series/tutorials/the-series.html): My notes.\n:::\n\n"
+            "## Setup\n\nPick one.\n\n::: {.panel-tabset}\n### Mamba\n\nmamba x\n\n### Conda\n\nconda x\n:::\n\n"
+            "### Install\n\nSteps.\n\n#### Detail\n\nMore.\n\n## Conclusion\n\nDone.\n")
+    note = note_from_text("/c/posts/p/index.md", text, corpus_root="/c/posts",
+                          profile="quarto_post", lossless=True)
+    parent, following = section_outline(note.sections)
+    assert compose_note_text(note.frontmatter_raw, note.sections, parent, following) == text
+
+
+def test_composition_derives_heading_level_from_depth():
+    # Level is presentation (design 56c9c332 (4)): a skipped level closes up, the top level
+    # renders at H2, and heading-line whitespace takes the composed form.
+    text = "### A  \n\nx\n\n#####  B\n\ny\n\n### C\n\nz\n"
+    note = note_from_text("/c/posts/p/index.md", text, corpus_root="/c/posts",
+                          profile="quarto_post", lossless=True)
+    parent, following = section_outline(note.sections)
+    assert compose_note_text("", note.sections, parent, following) == (
+        "## A\n\nx\n\n### B\n\ny\n\n## C\n\nz\n")
+    assert compose_note_text("", note.sections, parent, following, top_level=1).startswith("# A\n")
+
+
+def test_composition_follows_the_relations_not_the_stored_order():
+    note = note_from_text("/c/posts/p/index.md", "## A\n\na\n\n## B\n\nb\n\n## C\n\nc\n",
+                          corpus_root="/c/posts", profile="quarto_post", lossless=True)
+    a, b, c = (s.id for s in note.sections)
+    # Reorder by re-pointing NEXT (C first), and re-parent B under C: one relation edit each.
+    assert compose_note_text("", note.sections, {b: c}, {c: a}) == "## C\n\nc\n\n### B\n\nb\n\n## A\n\na\n"
+
+
+def test_malformed_outline_refuses_rather_than_reordering():
+    note = note_from_text("/c/posts/p/index.md", "## A\n\na\n\n## B\n\nb\n",
+                          corpus_root="/c/posts", profile="quarto_post", lossless=True)
+    a, b = (s.id for s in note.sections)
+    for following in ({}, {a: b, b: a}):  # two first siblings; a cycle with no first
+        with pytest.raises(ValueError, match="outline"):
+            compose_note_text("", note.sections, {}, following)
+
+
+def test_composition_reads_graph_wires_alike():
+    # The projection composes from queried nodes: the Section wire's id + title / text / level.
+    note = note_from_text("/c/posts/p/index.md", "Lede.\n\n## A\n\na\n\n### B\n\nb\n",
+                          corpus_root="/c/posts", profile="quarto_post", lossless=True)
+    parent, following = section_outline(note.sections)
+    wires = [s.to_graph_node() for s in reversed(note.sections)]  # any input order
+    assert compose_note_text("", wires, parent, following) == "Lede.\n\n## A\n\na\n\n### B\n\nb\n"
+
+
+def test_composition_owns_the_separators_between_elements():
+    # Blank-line runs and a heading glued to its body are layout, not content: the composed form
+    # puts one blank line after the frontmatter and between elements. Whole blank lines only --
+    # a last content line keeps its trailing spaces (an empty list item `* ` is not `*`).
+    text = "---\ntitle: P\n---\nLede. \n\n\n\n## A\nx\n\n\n## B  \n\n\n* \n  \n\n"
+    note = note_from_text("/c/posts/p/index.md", text, corpus_root="/c/posts",
+                          profile="quarto_post", lossless=True)
+    composed = compose_note_text(note.frontmatter_raw, note.sections, *section_outline(note.sections))
+    assert composed == "---\ntitle: P\n---\n\nLede. \n\n## A\n\nx\n\n## B\n\n* \n"
+    again = note_from_text("/c/posts/p/index.md", composed, corpus_root="/c/posts",
+                           profile="quarto_post", lossless=True)
+    assert compose_note_text(again.frontmatter_raw, again.sections,
+                             *section_outline(again.sections)) == composed  # a fixpoint
+    assert {s.id for s in again.sections} == {s.id for s in note.sections}
+
+
+def test_a_heading_line_an_open_block_absorbs_is_no_section():
+    # Pandoc's blank_before_header (Quarto keeps it on): an ATX line right after a line that leaves
+    # a paragraph open is that paragraph's text, and right after an EMPTY list item it is the
+    # item's content (`<li><h3>`). After a blank line, a heading or a fence it is a heading.
+    body = ("## A\n\n* item text:\n### $$x = y$$\n\nprose\n#### Glued\n\n* \n### In the item\n\n"
+            "::: {.callout-note}\n## Callout title\n:::\n\n## B\n### Under B\n")
+    secs = decompose_sections(body, note_node_id("p"), lossless=True, blank_before_heading=True)
+    assert [s.anchor for s in secs] == ["a", "callout-title", "b", "under-b"]
+    assert all(h in secs[0].text for h in ("### $$x = y$$", "#### Glued", "### In the item"))
+    # A corpus no Pandoc reader renders (the memory notes) keeps every ATX line a heading.
+    plain = decompose_sections(body, note_node_id("p"), lossless=True)
+    assert [s.anchor for s in plain] == ["a", "x-y", "glued", "in-the-item", "callout-title", "b", "under-b"]
+    # A post's profile switches it on.
+    post = note_from_text("/c/posts/p/index.md", body, corpus_root="/c/posts", profile="quarto_post", lossless=True)
+    assert "glued" not in {s.anchor for s in post.sections}
