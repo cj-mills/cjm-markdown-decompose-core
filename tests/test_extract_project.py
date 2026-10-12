@@ -1,13 +1,11 @@
 """Extract markdown -> NoteNode and project notes -> MEMORY.md index (with idempotency)."""
 
 import pytest
-
 from cjm_dev_graph_schema.identity import note_node_id
 from cjm_dev_graph_schema.nodes import NoteNode
 from cjm_markdown_decompose_core.extract import corpus_index_files, note_from_text
-from cjm_markdown_decompose_core.project import (
-    first_sentence, note_index_line, render_memory_index, render_onboarding_surface,
-)
+from cjm_markdown_decompose_core.project import (first_sentence, note_index_line,
+                                                 render_memory_index, render_onboarding_surface)
 
 PROJECT_DOC = """---
 name: self-hosting-graph-arc

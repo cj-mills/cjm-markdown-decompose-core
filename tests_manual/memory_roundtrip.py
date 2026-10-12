@@ -21,22 +21,21 @@ libs installed editable):
 
 A SCRATCH db is used; no real corpus/graph is touched.
 """
+
 import argparse
 import asyncio
 import sys
 import tempfile
 from pathlib import Path
 
-from cjm_substrate.core.manager import CapabilityManager
-from cjm_substrate.core.queue import JobQueue
 from cjm_context_graph_layer.ops import extend_graph, graph_task
 from cjm_context_graph_primitives.query import NodeQuery
-
 from cjm_markdown_decompose_core.extract import note_from_file
 from cjm_markdown_decompose_core.ingest import corpus_graph_elements
-from cjm_markdown_decompose_core.project import (
-    render_memory_index, render_memory_index_from_graph_nodes,
-)
+from cjm_markdown_decompose_core.project import (render_memory_index,
+                                                 render_memory_index_from_graph_nodes)
+from cjm_substrate.core.manager import CapabilityManager
+from cjm_substrate.core.queue import JobQueue
 
 GRAPH_ID = "cjm-capability-graph-sqlite"
 DEFAULT_MEMORY = ("/home/innom-dt/.claude/projects/"

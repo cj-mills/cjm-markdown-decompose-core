@@ -1,11 +1,9 @@
 """Body -> ordered Section nodes: anchors, hierarchy, verbatim text, disambiguation."""
 
 import pytest
-
 from cjm_dev_graph_schema.identity import note_node_id, section_node_id
 from cjm_dev_graph_schema.vocab import DevNodeKinds, DevRelations
 from cjm_markdown_decompose_core.extract import note_from_text
-
 from cjm_markdown_decompose_core.project import (compose_note_text, element_state, render_note_text,
                                                  section_outline)
 from cjm_markdown_decompose_core.sections import decompose_sections, heading_anchor

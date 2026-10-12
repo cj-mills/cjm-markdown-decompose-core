@@ -2,9 +2,10 @@
 
 from cjm_markdown_decompose_core.extract import note_from_text
 from cjm_markdown_decompose_core.parse import parse_markdown
-from cjm_markdown_decompose_core.relations import (
-    detect_profile, harvest_aliases, harvest_categories, harvest_relations, harvest_site_links,
-    is_page_target, is_site_link, normalize_permalink, quarto_site_url, slugify)
+from cjm_markdown_decompose_core.relations import (detect_profile, harvest_aliases,
+                                                   harvest_categories, harvest_relations,
+                                                   harvest_site_links, is_page_target, is_site_link,
+                                                   normalize_permalink, quarto_site_url, slugify)
 
 # A representative Quarto blog post (shape from christianjmills/posts).
 QUARTO_POST = """---

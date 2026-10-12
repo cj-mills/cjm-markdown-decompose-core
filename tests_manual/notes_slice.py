@@ -1,10 +1,14 @@
 """Runtime harness: decompose a real christianjmills/posts slice through the full
 increment-2 pipeline (permalink identity + relationship harvesters + dedup) and
 report the relationship graph that lights up — the Gatto cluster convergence."""
-import collections, glob, os
+
+import collections
+import glob
+import os
+
+from cjm_dev_graph_schema.identity import series_node_id, topic_node_id
 from cjm_markdown_decompose_core.extract import note_from_file
 from cjm_markdown_decompose_core.ingest import corpus_graph_elements
-from cjm_dev_graph_schema.identity import series_node_id, topic_node_id
 
 ROOT = "/mnt/SN850X_8TB_EXT4/Projects/GitHub/cj-mills/christianjmills/posts"
 SLICE = ["pytorch-train-object-detector-yolox-tutorial", "tfjs-yolox-unity-tutorial",

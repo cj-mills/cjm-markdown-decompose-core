@@ -4,9 +4,8 @@ from cjm_dev_graph_schema.identity import note_node_id, topic_node_id
 from cjm_dev_graph_schema.vocab import DevNodeKinds, DevRelations
 from cjm_markdown_decompose_core.extract import note_from_text
 from cjm_markdown_decompose_core.ingest import corpus_graph_elements
-from cjm_markdown_decompose_core.project import (
-    note_view_from_graph_node, render_memory_index, render_memory_index_from_graph_nodes,
-)
+from cjm_markdown_decompose_core.project import (note_view_from_graph_node, render_memory_index,
+                                                 render_memory_index_from_graph_nodes)
 
 PROJECT_DOC = """---
 name: alpha

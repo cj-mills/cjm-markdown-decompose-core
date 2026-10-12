@@ -1,9 +1,8 @@
 """Schema-free Markdown parsing."""
 
-from cjm_markdown_decompose_core.parse import (
-    extract_headings, extract_wiki_links, fenced_code_spans, find_headings, parse_frontmatter,
-    parse_markdown, split_frontmatter,
-)
+from cjm_markdown_decompose_core.parse import (extract_headings, extract_wiki_links,
+                                               fenced_code_spans, find_headings, parse_frontmatter,
+                                               parse_markdown, split_frontmatter)
 
 DOC = """---
 name: self-hosting-graph-arc

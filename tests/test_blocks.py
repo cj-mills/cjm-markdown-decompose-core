@@ -1,10 +1,11 @@
 """Derived blocks (design 253ac996): classification, typed sections, harvest masking; fenced
 blocks (ruling d5442ba8): tabsets and callouts whose headings open no section."""
 
-from cjm_markdown_decompose_core.blocks import (
-    CALLOUT, CHROME_INCLUDE, HAND_TOC, SERIES_CALLOUT, SERIES_NAV_LINE, TABSET, block_link_targets,
-    derived_blocks, fenced_block_parts, fenced_blocks, include_target, mask_blocks,
-    quarto_derived_blocks, quarto_fenced_blocks)
+from cjm_markdown_decompose_core.blocks import (block_link_targets, CALLOUT, CHROME_INCLUDE,
+                                                derived_blocks, fenced_block_parts, fenced_blocks,
+                                                HAND_TOC, include_target, mask_blocks,
+                                                quarto_derived_blocks, quarto_fenced_blocks,
+                                                SERIES_CALLOUT, SERIES_NAV_LINE, TABSET)
 from cjm_markdown_decompose_core.extract import note_from_text
 from cjm_markdown_decompose_core.sections import CONTINUATION_SEP, PREAMBLE_ANCHOR
 
