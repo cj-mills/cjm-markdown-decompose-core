@@ -195,6 +195,7 @@ def harvest_site_links(
 @dataclass
 class NoteRelations:
     """The harvested relationship signals for one note (beyond `[[wiki-links]]`)."""
+
     categories: List[str] = field(default_factory=list)       # Normalized Topic keys
     site_refs: List[str] = field(default_factory=list)        # Verbatim site-link targets the resolve pass maps (every page link into the site)
     aliases: List[str] = field(default_factory=list)          # Alternate-identity permalinks

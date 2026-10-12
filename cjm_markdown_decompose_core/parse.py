@@ -37,6 +37,7 @@ _BLOCK_MARKER_RE = re.compile(r"^[ \t]*(?:>[ \t]?|(?:[*+-]|\d{1,9}[.)])(?:[ \t]+
 @dataclass
 class ParsedMarkdown:
     """The structural decomposition of one Markdown document."""
+
     frontmatter: Dict[str, Any] = field(default_factory=dict)  # Parsed YAML frontmatter ({} if none)
     body: str = ""                                             # Document body (frontmatter stripped)
     wiki_links: List[str] = field(default_factory=list)       # `[[link]]` targets, de-duplicated in first-seen order

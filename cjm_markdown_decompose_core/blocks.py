@@ -82,6 +82,7 @@ _URI_ESCAPED = set('<>|"{}[]^`')
 @dataclass(frozen=True)
 class DerivedBlock:
     """One derived block: its role and its `[start, end)` span of the body."""
+
     role: str   # SERIES_CALLOUT | HAND_TOC | SERIES_NAV_LINE | CHROME_INCLUDE
     start: int  # Span start (character offset into the body)
     end: int    # Span end (exclusive), trailing blank lines included
@@ -92,6 +93,7 @@ class FencedBlock:
     """One content div whose headings open no Section (ruling d5442ba8 on finding 67a54d21):
     its kind, its `[start, end)` span of the body (opener line through closer line) and the
     opener's attributes as written."""
+
     kind: str   # TABSET | CALLOUT
     start: int  # Span start (the opener line's offset)
     end: int    # Span end (exclusive), through the closer line
